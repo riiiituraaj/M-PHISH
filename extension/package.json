@@ -1,0 +1,1 @@
+{"scripts":{"build":"esbuild src/popup.ts src/background.ts src/content.ts src/options.ts --bundle --outdir=. --format=iife"},"devDependencies":{"@types/chrome":"^0.0.287","esbuild":"^0.24.2","typescript":"^5.7.2"}}

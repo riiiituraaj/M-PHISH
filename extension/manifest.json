@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "M-PHISH X",
+  "version": "0.1.0",
+  "description": "Understand suspicious digital interactions before you trust them.",
+  "icons": {"16": "icon.svg", "32": "icon.svg", "48": "icon.svg", "128": "icon.svg"},
+  "action": {"default_popup": "popup.html", "default_title": "Investigate with M-PHISH X", "default_icon": {"16": "icon.svg", "32": "icon.svg"}},
+  "options_ui": {"page": "options.html", "open_in_tab": true},
+  "permissions": ["activeTab", "storage", "webNavigation", "notifications"],
+  "host_permissions": ["http://localhost:8000/*"],
+  "content_scripts": [{"matches": ["http://*/*", "https://*/*"], "js": ["content.js"], "run_at": "document_idle"}],
+  "background": {"service_worker": "background.js"}
+}
