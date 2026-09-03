@@ -7,6 +7,7 @@ import json
 import re
 import sqlite3
 import socket
+import os
 import httpx
 from dotenv import load_dotenv
 
@@ -70,7 +71,7 @@ app.add_middleware(InvestigationRateLimitMiddleware)
 app.add_middleware(OptionalAPIKeyMiddleware)
 
 INVESTIGATIONS: dict[str, dict] = {}
-DB_PATH = Path(__file__).resolve().parents[2] / "m_phish.db"
+DB_PATH = Path(os.getenv("SQLITE_DB_PATH", Path(__file__).resolve().parents[1] / "m_phish.db"))
 
 
 def db() -> sqlite3.Connection:
