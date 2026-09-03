@@ -30,7 +30,7 @@ from .services.webpage.analyzer import analyze_sync
 from .services.domain.analyzer import analyze as analyze_domain
 
 app = FastAPI(title="M-PHISH X API", version="0.1.0")
-app.add_middleware(CORSMiddleware, allow_origins=["https://m-phish.vercel.app"], allow_origin_regex=r"chrome-extension://.*", allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=["https://m-phish.vercel.app"], allow_origin_regex=r"(?:chrome-extension://.*|https://m-phish-[a-z0-9-]+\.vercel\.app)", allow_methods=["*"], allow_headers=["*"])
 configure_logging(settings.log_level)
 logger = logging.getLogger("m_phish.api")
 request_counts: dict[str, list[float]] = {}
