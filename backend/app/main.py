@@ -136,7 +136,7 @@ def ai_explanation(evidence: list[dict], score: int, classification: str, fallba
         response.raise_for_status()
         result = json.loads(response.json()["choices"][0]["message"]["content"])
         return {"provider": "groq", "model": settings.ai_model, "summary": str(result.get("summary", fallback_summary)), "recommended_action": str(result.get("recommended_action", fallback_recommendation)), "uncertainty": str(result.get("uncertainty", "This is an evidence-based risk assessment, not a guarantee."))}
-    except (httpx.HTTPError, KeyError, IndexError, TypeError, json.JSONDecodeError):
+    except Exception:
         logger.warning("AI provider unavailable; using fallback explanation")
         return {"provider": "fallback", "model": None, "summary": fallback_summary, "recommended_action": fallback_recommendation, "uncertainty": "The AI provider was unavailable; this result uses deterministic evidence."}
 
