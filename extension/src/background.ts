@@ -1,6 +1,6 @@
 type QuickCheck={tier:'LOW'|'MEDIUM'|'HIGH';deep_required:boolean;top_reasons:string[];score:number}
 type TabContext={session_id:string;previous_url?:string;current_url:string;domains_seen:string[];timestamp:string}
-const API='http://localhost:8000'
+const API='https://m-phish.onrender.com'
 const TTL=5*60*1000
 const supported=(url?:string)=>!!url&&/^https?:\/\//i.test(url)
 const key=(url:string)=>`result:${url}`

@@ -1,6 +1,6 @@
 (() => {
   // src/background.ts
-  var API = "http://localhost:8000";
+  var API = "https://m-phish.onrender.com";
   var TTL = 5 * 60 * 1e3;
   var supported = (url) => !!url && /^https?:\/\//i.test(url);
   var key = (url) => `result:${url}`;

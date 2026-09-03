@@ -1,6 +1,6 @@
 (() => {
   // src/popup.ts
-  var API = "http://localhost:8000";
+  var API = "https://m-phish.onrender.com";
   var root = document.getElementById("app");
   var escape = (value) => value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   function shell(body) {
@@ -47,7 +47,7 @@
   }
   function showReport(report) {
     shell(`<div class="score">${report.risk_score}<small> / 100</small></div><div class="risk">${escape(report.classification)}</div><p class="summary">${escape(report.summary)}</p>${report.evidence.slice(0, 3).map((e) => `<div class="reason">${escape(e.title)}</div>`).join("")}<button class="button secondary" id="why" aria-expanded="false">Why this result</button><button class="button" id="full">Full Report</button><section class="details" id="details" hidden><h2>Why this result?</h2>${report.evidence.slice(0, 5).map((e) => `<div class="detail"><b>${escape(e.title)}</b><span>${escape(e.category)} \xB7 ${Math.round(e.confidence * 100)}% confidence${e.weight ? ` \xB7 +${e.weight}` : ""}</span><p>${escape(e.description)}</p></div>`).join("")}<div class="recommendation"><b>Safer next step</b><p>${escape(report.recommendation)}</p></div><div class="detail-url">${escape(report.url)}</div></section>`);
-    document.getElementById("full").onclick = () => chrome.tabs.create({ url: `http://localhost:3000/investigations/${report.id}` });
+    document.getElementById("full").onclick = () => chrome.tabs.create({ url: `https://m-phish.vercel.app/investigations/${report.id}` });
     document.getElementById("why").onclick = () => {
       const details = document.getElementById("details");
       const button = document.getElementById("why");
