@@ -1,8 +1,7 @@
-FROM python:3.12-slim
+FROM mcr.microsoft.com/playwright/python:v1.49.1-jammy
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-RUN python -m playwright install --with-deps chromium
 COPY app ./app
 RUN useradd --create-home --uid 10001 appuser && chown -R appuser:appuser /app
 USER appuser
