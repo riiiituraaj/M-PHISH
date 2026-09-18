@@ -53,9 +53,9 @@ function attachInteractionListeners() {
     if (tagName !== "input" && tagName !== "textarea" && tagName !== "select") return;
 
     const input = target as HTMLInputElement;
-    const type = (input.type || "").toLowerCase();
-    const name = (input.name || "").toLowerCase();
-    const placeholder = (input.placeholder || "").toLowerCase();
+    const type = (input.getAttribute("type") || "").toLowerCase();
+    const name = (input.getAttribute("name") || "").toLowerCase();
+    const placeholder = (input.getAttribute("placeholder") || "").toLowerCase();
 
     let actionType: string | null = null;
     let fieldLabel = "personal information";

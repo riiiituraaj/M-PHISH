@@ -44,9 +44,9 @@
       const tagName = target.tagName.toLowerCase();
       if (tagName !== "input" && tagName !== "textarea" && tagName !== "select") return;
       const input = target;
-      const type = (input.type || "").toLowerCase();
-      const name = (input.name || "").toLowerCase();
-      const placeholder = (input.placeholder || "").toLowerCase();
+      const type = (input.getAttribute("type") || "").toLowerCase();
+      const name = (input.getAttribute("name") || "").toLowerCase();
+      const placeholder = (input.getAttribute("placeholder") || "").toLowerCase();
       let actionType = null;
       let fieldLabel = "personal information";
       if (type === "password" || name.includes("pass") || name.includes("pwd") || name.includes("pin")) {
