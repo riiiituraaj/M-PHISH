@@ -1,7 +1,8 @@
 /**
  * M-PHISH X options page.
  *
- * Full-tab settings surface: protection toggles and explanation depth.
+ * Full-tab settings surface: protection toggles, explanation depth,
+ * and dashboard address used by the popup's "View full report" button.
  */
 
 type Preferences = {
@@ -9,6 +10,7 @@ type Preferences = {
   automaticNotifications: boolean;
   showLowRisk: boolean;
   explanationLevel: string;
+  dashboardUrl: string;
 };
 
 const defaults: Preferences = {
@@ -16,6 +18,7 @@ const defaults: Preferences = {
   automaticNotifications: true,
   showLowRisk: false,
   explanationLevel: "standard",
+  dashboardUrl: "",
 };
 
 const root = document.getElementById("options")!;
@@ -101,6 +104,26 @@ function render(value: Partial<Preferences>) {
         </div>
       </section>
 
+      <section class="section">
+        <div class="section-head">
+          <span class="label">Dashboard</span>
+          <h2>Report destination</h2>
+          <p>The "View full report" button opens investigations in this dashboard.</p>
+        </div>
+        <div class="field">
+          <label for="dashboard">Dashboard address</label>
+          <input
+            id="dashboard"
+            type="url"
+            inputmode="url"
+            spellcheck="false"
+            placeholder="https://m-phish.vercel.app"
+            value="${escape(prefs.dashboardUrl)}"
+          />
+          <span class="field-hint">Leave empty to detect automatically: a local backend links to localhost:3000, otherwise the hosted dashboard is used.</span>
+        </div>
+      </section>
+
       <div class="options-actions">
         <button class="button primary" id="save" type="button">Save settings</button>
         <button class="button ghost" id="reset" type="button">Reset to defaults</button>
@@ -122,6 +145,7 @@ function render(value: Partial<Preferences>) {
     automaticNotifications: read("notifications"),
     showLowRisk: read("lowrisk"),
     explanationLevel: readValue("level"),
+    dashboardUrl: readValue("dashboard").trim(),
   });
 
   document.getElementById("save")!.onclick = async () => {

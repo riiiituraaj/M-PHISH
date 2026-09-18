@@ -65,11 +65,15 @@ type Job = { id: string; status: string };
 type Tone = "trusted" | "caution" | "high-risk" | "stop";
 
 const API_ENDPOINTS = ["https://m-phish.onrender.com", "http://localhost:8000"];
+const DEFAULT_DASHBOARD = "https://m-phish.vercel.app";
+const LOCAL_DASHBOARD = "http://localhost:3000";
 
 const root = document.getElementById("app")!;
 
 /** Backend base that answered last. */
 let activeBase: string | null = null;
+/** Optional dashboard override saved from the options page. */
+let dashboardOverride: string | null = null;
 
 const escape = (value: string) =>
   (value || "").replace(/[&<>"']/g, (c) => {
@@ -103,6 +107,17 @@ const TONE_ICON: Record<Tone, string> = {
   "high-risk": ICON_ALERT,
   stop: ICON_ALERT,
 };
+
+/** Dashboard base URL: saved override, else derived from the backend that answered. */
+function dashboardBase() {
+  if (dashboardOverride) return dashboardOverride.replace(/\/+$/, "");
+  if (activeBase && activeBase.includes("localhost")) return LOCAL_DASHBOARD;
+  return DEFAULT_DASHBOARD;
+}
+
+function openDashboard(path = "") {
+  chrome.tabs.create({ url: `${dashboardBase()}${path}` });
+}
 
 function header() {
   return `
@@ -313,6 +328,7 @@ function renderReady(url: string, quick: QuickCheck) {
 
     <div class="actions">
       <button class="button primary" id="check" type="button">Run full investigation</button>
+      <button class="button ghost" id="view-signals" type="button">View details</button>
     </div>
 
     ${disclosure("quick-signals", "URL signals", `<div class="evidence-list">${signals}</div>`)}
@@ -324,6 +340,18 @@ function renderReady(url: string, quick: QuickCheck) {
     const current = tabs[0];
     if (current?.id && current.url && /^https?:/i.test(current.url))
       await checkCurrent(current.id, current.url);
+  };
+  document.getElementById("view-signals")!.onclick = () => {
+    const toggle = document.getElementById("quick-signals");
+    const panel = document.getElementById("quick-signals-panel");
+    if (toggle && panel) {
+      const open = panel.hasAttribute("hidden");
+      if (open) {
+        panel.removeAttribute("hidden");
+        toggle.setAttribute("aria-expanded", "true");
+        toggle.classList.add("open");
+      }
+    }
   };
   bindDisclosure("quick-signals");
   bindFooter();
@@ -404,7 +432,10 @@ function showReport(report: Report) {
 
     <div class="actions">
       ${safeRouteButton}
-      <button class="button primary" id="refresh" type="button">
+      <button class="button primary" id="full-report" type="button">
+        ${ICON_EXTERNAL} View full report on dashboard
+      </button>
+      <button class="button ghost" id="refresh" type="button">
         ${ICON_REFRESH} Re-check this page
       </button>
     </div>
@@ -419,6 +450,8 @@ function showReport(report: Report) {
 
     ${footer()}`);
 
+  document.getElementById("full-report")!.onclick = () =>
+    openDashboard(`/investigations/${encodeURIComponent(report.id)}`);
   document.getElementById("refresh")!.onclick = async () => {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     const current = tabs[0];
@@ -430,7 +463,12 @@ function showReport(report: Report) {
 }
 
 async function init() {
-  const settings = await chrome.storage.local.get(["protectionEnabled"]);
+  const settings = await chrome.storage.local.get(["protectionEnabled", "dashboardUrl"]);
+
+  dashboardOverride =
+    typeof settings.dashboardUrl === "string" && settings.dashboardUrl.trim()
+      ? settings.dashboardUrl.trim()
+      : null;
 
   if (settings.protectionEnabled === false) {
     renderOff();
