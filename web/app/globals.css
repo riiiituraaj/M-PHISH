@@ -164,7 +164,7 @@ main.report {
 /* Top bar ------------------------------------------------------------------ */
 .topbar {
   position: sticky;
-  top: 0;
+  top: 12px;
   z-index: 40;
   display: flex;
   align-items: center;
@@ -175,7 +175,7 @@ main.report {
   margin: 0 auto;
   padding: 9px 22px;
   border: 1px solid var(--line);
-  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  border-radius: var(--radius-lg);
   background: rgba(6, 11, 22, 0.78);
   box-shadow: var(--shadow-soft);
   backdrop-filter: blur(18px) saturate(140%);
