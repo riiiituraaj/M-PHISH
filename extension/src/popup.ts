@@ -242,7 +242,7 @@ function renderLoading(host: string) {
     </div>`);
 }
 
-async function checkCurrent(tabId: number, url: string) {
+async function checkCurrent(tabId: number, url: string, forceDeep = false) {
   renderLoading(hostOf(url));
   try {
     const quick = await request<QuickCheck>("/api/v1/quick-check", {
@@ -250,7 +250,7 @@ async function checkCurrent(tabId: number, url: string) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url, context: { tab_id: tabId } }),
     });
-    if (!quick.deep_required) {
+    if (!quick.deep_required && !forceDeep) {
       renderReady(url, quick);
       return;
     }
@@ -273,7 +273,7 @@ async function checkCurrent(tabId: number, url: string) {
     throw new Error("The investigation timed out.");
   } catch (error) {
     const message = error instanceof Error ? error.message : "Service unreachable.";
-    renderError(message, () => checkCurrent(tabId, url));
+    renderError(message, () => checkCurrent(tabId, url, forceDeep));
   }
 }
 
@@ -328,6 +328,9 @@ function renderReady(url: string, quick: QuickCheck) {
 
     <div class="actions">
       <button class="button primary" id="check" type="button">Run full investigation</button>
+      <button class="button ghost" id="open-dashboard-ready" type="button">
+        ${ICON_EXTERNAL} View full report on dashboard
+      </button>
       <button class="button ghost" id="view-signals" type="button">View details</button>
     </div>
 
@@ -339,8 +342,10 @@ function renderReady(url: string, quick: QuickCheck) {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     const current = tabs[0];
     if (current?.id && current.url && /^https?:/i.test(current.url))
-      await checkCurrent(current.id, current.url);
+      await checkCurrent(current.id, current.url, true);
   };
+  document.getElementById("open-dashboard-ready")!.onclick = () =>
+    openDashboard(`/investigations/${encodeURIComponent(url)}`);
   document.getElementById("view-signals")!.onclick = () => {
     const toggle = document.getElementById("quick-signals");
     const panel = document.getElementById("quick-signals-panel");
