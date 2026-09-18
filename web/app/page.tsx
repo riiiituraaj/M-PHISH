@@ -8,10 +8,13 @@ import {
   ShieldCheck,
   Sparkles,
   TrendingUp,
+  Play,
+  ExternalLink,
+  ChevronRight,
 } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { investigate, listInvestigations, Report } from "../lib/api";
+import { investigate, listInvestigations, getDemoScenarios, Report, DemoScenario } from "../lib/api";
 
 const signalChecklist = [
   "Domain reputation mismatch",
@@ -23,14 +26,19 @@ const signalChecklist = [
 export default function Home() {
   const router = useRouter();
   const [reports, setReports] = useState<Report[]>([]);
+  const [scenarios, setScenarios] = useState<DemoScenario[]>([]);
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
+  const [runningDemo, setRunningDemo] = useState<string | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    listInvestigations()
-      .then(setReports)
+    Promise.all([listInvestigations(), getDemoScenarios()])
+      .then(([reportsData, scenariosData]) => {
+        setReports(reportsData);
+        setScenarios(scenariosData);
+      })
       .catch(() => setError("Live investigation data is unavailable."))
       .finally(() => setLoading(false));
   }, []);
@@ -49,6 +57,18 @@ export default function Home() {
     }
   }
 
+  async function runDemoScenario(scenario: DemoScenario) {
+    setRunningDemo(scenario.id);
+    setError("");
+    try {
+      const report = await investigate(scenario.url);
+      router.push(`/investigations/${report.id}`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The demo check failed.");
+      setRunningDemo(null);
+    }
+  }
+
   const highRisk = reports.filter((report) => ["HIGH", "CRITICAL", "STOP"].includes(report.classification)).length;
   const confidence = reports.length
     ? Math.round(reports.reduce((total, report) => total + report.confidence, 0) / reports.length)
@@ -59,6 +79,18 @@ export default function Home() {
     { label: "Evidence captured", value: String(reports.reduce((total, report) => total + report.evidence.length, 0)) },
     { label: "Avg. confidence", value: `${confidence}%` },
   ];
+
+  const riskColor: Record<string, string> = {
+    LOW: "low",
+    MEDIUM: "moderate",
+    HIGH: "high",
+    CRITICAL: "stop",
+    STOP: "stop",
+    TRUSTED: "low",
+    CAUTION: "moderate",
+    HIGH_RISK: "high",
+  };
+
   return (
     <main className="dashboard-shell">
       <section className="hero-panel real">
@@ -177,6 +209,69 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      {scenarios.length > 0 && (
+        <section className="surface" style={{ marginTop: 12 }}>
+          <div className="panel-header-row">
+            <div>
+              <div className="section-kicker">Verified walkthroughs</div>
+              <h2>Demo scenarios with deep checks</h2>
+            </div>
+          </div>
+          <p className="subtle" style={{ marginBottom: 18 }}>
+            Pre-configured safe fixtures that exercise every detection layer. Click "Run deep check" to launch a full
+            investigation and view the detailed forensic report.
+          </p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 16 }}>
+            {scenarios.map((scenario) => (
+              <div
+                key={scenario.id}
+                className="surface"
+                style={{ padding: 20, border: "1px solid var(--line)", borderRadius: "var(--radius-lg)" }}
+              >
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
+                  <div style={{ flex: 1 }}>
+                    <h3 style={{ margin: 0, fontSize: "0.95rem", fontWeight: 650 }}>{scenario.title}</h3>
+                    <p className="subtle" style={{ marginTop: 4, fontSize: "0.82rem", lineHeight: 1.5 }}>{scenario.description}</p>
+                  </div>
+                  <span className={`risk-pill ${riskColor[scenario.expected_state] || "unknown"}`} style={{ flexShrink: 0 }}>
+                    {scenario.expected_state}
+                  </span>
+                </div>
+                <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                  <button
+                    className="primary-action"
+                    style={{ flex: 1, minHeight: 40, padding: "0 16px", fontSize: "0.8rem" }}
+                    onClick={() => runDemoScenario(scenario)}
+                    disabled={runningDemo === scenario.id}
+                  >
+                    {runningDemo === scenario.id ? (
+                      <>
+                        <span style={{ display: "inline-block", width: 14, height: 14, border: "2px solid currentColor", borderRightColor: "transparent", borderRadius: "50%", animation: "spin 720ms linear infinite", marginRight: 8 }} />
+                        Running deep check...
+                      </>
+                    ) : (
+                      <>
+                        <Play size={14} style={{ marginRight: 6 }} />
+                        Run deep check
+                      </>
+                    )}
+                  </button>
+                  <button
+                    className="secondary-action"
+                    style={{ minHeight: 40, padding: "0 16px", fontSize: "0.8rem" }}
+                    onClick={() => router.push(`/investigations`)}
+                    title="View all investigations"
+                  >
+                    <ExternalLink size={14} style={{ marginRight: 6 }} />
+                    History
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="insights-row">
         <div className="insight-card">

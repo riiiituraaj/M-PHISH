@@ -270,5 +270,6 @@ export async function getResearchExperiments(): Promise<ResearchSuite> {
 }
 
 export async function getDemoScenarios(): Promise<DemoScenario[]> {
-  return request<DemoScenario[]>("/api/v1/demo/scenarios");
+  const response = await request<{ success: boolean; data: DemoScenario[] }>("/api/v1/demo/scenarios");
+  return response.data;
 }
