@@ -70,7 +70,10 @@ const escape = (value: string) =>
   );
 
 function shell(body: string) {
-  root.innerHTML = `<div class="card"><div class="brand"><img src="icon.svg" alt=""><span>M-PHISH <b>X</b></span></div>${body}</div>`;
+  root.innerHTML = `<div class="card"><div class="topbar"><div class="brand"><img src="icon.svg" alt=""><span>M-PHISH <b>X</b></span></div><button class="dashboard-link" id="dashboard" type="button">Dashboard <span aria-hidden="true">↗</span></button></div>${body}</div>`;
+  document.getElementById("dashboard")!.onclick = () => {
+    chrome.tabs.create({ url: DASHBOARD_URL });
+  };
 }
 
 function renderOff() {

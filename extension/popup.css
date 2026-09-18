@@ -1,14 +1,14 @@
 :root {
-  --bg: #060b16;
-  --surface: #0d1626;
-  --surface-2: #121d30;
-  --line: rgba(120, 160, 200, 0.16);
-  --line-strong: rgba(86, 204, 242, 0.34);
-  --text: #eaf3ff;
-  --muted: #9cb2cd;
-  --faint: #6d8299;
-  --accent: #56ccf2;
-  --accent-strong: #22d3ee;
+  --bg: #0a0f16;
+  --surface: #111923;
+  --surface-2: #182330;
+  --line: rgba(174, 194, 214, 0.16);
+  --line-strong: rgba(105, 190, 232, 0.42);
+  --text: #edf3f8;
+  --muted: #a4b3c2;
+  --faint: #718294;
+  --accent: #7cc8ea;
+  --accent-strong: #56b7df;
   --success: #4ade80;
   --warning: #fbbf24;
   --danger: #f87171;
@@ -127,10 +127,16 @@ select:hover {
   padding: 18px 20px;
   min-height: 280px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background:
-    radial-gradient(circle at 8% -10%, rgba(34, 211, 238, 0.12), transparent 45%),
-    linear-gradient(160deg, #101c2f, #0a1220);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 24px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
 }
 .brand {
   display: flex;
@@ -149,6 +155,24 @@ select:hover {
 .brand b {
   color: var(--accent);
 }
+.dashboard-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.dashboard-link span {
+  font-size: 14px;
+  line-height: 1;
+}
+.dashboard-link:hover { color: #b9e8fa; }
 .state-banner {
   display: flex;
   align-items: center;
@@ -301,7 +325,7 @@ select:hover {
   height: 38px;
   border: 0;
   border-radius: var(--radius);
-  background: linear-gradient(135deg, #7ee0fb, #22d3ee);
+  background: var(--accent-strong);
   color: #04121e;
   font-weight: 700;
   font-size: 12.5px;
@@ -313,7 +337,7 @@ select:hover {
   text-decoration: none;
   transition: filter var(--speed) var(--ease), transform var(--speed) var(--ease);
 }
-.button:hover { filter: brightness(1.06); transform: translateY(-1px); }
+.button:hover { filter: brightness(1.08); transform: translateY(-1px); }
 .button.secondary {
   background: #172436;
   color: var(--muted);
