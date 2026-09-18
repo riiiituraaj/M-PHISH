@@ -51,6 +51,8 @@
 }
 
 html {
+  margin: 0;
+  padding: 0;
   background: var(--bg);
   -webkit-text-size-adjust: 100%;
 }
@@ -167,12 +169,13 @@ main.report {
   display: flex;
   align-items: center;
   gap: 22px;
-  width: min(1200px, calc(100% - 44px));
+  width: 100%;
+  max-width: 1200px;
   min-height: 64px;
   margin: 0 auto;
-  padding: 9px 12px 9px 16px;
+  padding: 9px 22px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
   background: rgba(6, 11, 22, 0.78);
   box-shadow: var(--shadow-soft);
   backdrop-filter: blur(18px) saturate(140%);
