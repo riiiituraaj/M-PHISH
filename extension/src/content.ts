@@ -95,7 +95,7 @@ function attachInteractionListeners() {
         },
       },
       (response) => {
-        if (chrome.runtime.lastError || !response) return;
+        if (!response) return;
         if (response.requires_intervention && !isDismissedForSession) {
           showTrustBeforeYouActBanner(response, input);
         }
