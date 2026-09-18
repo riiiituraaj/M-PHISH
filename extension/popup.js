@@ -1,6 +1,7 @@
 (() => {
   // src/popup.ts
-  var API_ENDPOINTS = ["http://localhost:8000", "https://m-phish.onrender.com"];
+  var API_ENDPOINTS = ["https://m-phish.onrender.com", "http://localhost:8000"];
+  var DASHBOARD_URL = "https://m-phish.vercel.app";
   var root = document.getElementById("app");
   var escape = (value) => (value || "").replace(
     /[&<>"']/g,
@@ -43,7 +44,7 @@
         body: JSON.stringify({ url, context: { tab_id: tabId } })
       });
       if (!quick.deep_required) {
-        renderReady(url);
+        renderReady(url, quick);
         return;
       }
       const job = await request("/api/v1/investigations", {
@@ -71,16 +72,30 @@
       document.getElementById("retry").onclick = () => checkCurrent(tabId, url);
     }
   }
-  function renderReady(url) {
+  function renderReady(url, quick) {
     const host = new URL(url).hostname;
+    const trustScore = Math.max(0, Math.min(100, 100 - quick.score));
+    const state = quick.tier === "LOW" ? "trusted" : quick.tier === "MEDIUM" ? "caution" : "high-risk";
+    const stateTitle = quick.tier === "LOW" ? "Website appears trustworthy" : quick.tier === "MEDIUM" ? "CAUTION ADVISED" : "HIGH RISK DETECTED";
+    const dot = quick.tier === "LOW" ? "green" : quick.tier === "MEDIUM" ? "amber" : "orange";
+    const reasons = quick.top_reasons.length ? quick.top_reasons.map((reason) => `<div class="detail"><b>${escape(reason)}</b><span>URL signal</span></div>`).join("") : `<div class="detail"><b>No suspicious URL signals detected</b><span>URL analysis</span></div>`;
     shell(
-      `<div class="state-banner trusted"><span class="dot green"></span> Website appears trustworthy</div><div class="host">${escape(host)}</div><div class="trust-score-row"><div><span class="trust-label">Digital Trust</span><div class="trust-val">88<small> / 100</small></div></div><span class="trust-pill trusted">TRUSTED</span></div><div class="trust-grid"><div class="trust-dim"><span>Identity</span><b>Good</b></div><div class="trust-dim"><span>Security</span><b>Good</b></div><div class="trust-dim"><span>Privacy</span><b>Good</b></div><div class="trust-dim"><span>Behavior</span><b>Good</b></div></div><button class="button" id="check">Run Deep Investigation</button><button class="button secondary" id="toggle">Turn Off Protection</button>`
+      `<div class="state-banner ${state}"><span class="dot ${dot}"></span> ${escape(stateTitle)}</div><div class="host">${escape(host)}</div><div class="trust-score-row"><div><span class="trust-label">Digital Trust</span><div class="trust-val">${trustScore}<small> / 100</small></div></div><span class="trust-pill ${state}">${escape(quick.tier)}</span></div><div class="trust-grid"><div class="trust-dim"><span>URL risk</span><b>${quick.score}/100</b></div><div class="trust-dim"><span>Signals</span><b>${quick.top_reasons.length}</b></div><div class="trust-dim"><span>Analysis</span><b>Quick</b></div><div class="trust-dim"><span>Deep scan</span><b>Available</b></div></div><div class="btn-group"><button class="button" id="check">Run Full Investigation</button><button class="button secondary" id="quick-details" aria-expanded="false">View Details</button></div><section class="details" id="quick-report-details" hidden><h2>URL Analysis</h2>${reasons}<div class="detail-url">${escape(url)}</div></section><button class="button secondary" id="toggle">Turn Off Protection</button>`
     );
     document.getElementById("check").onclick = async () => {
       const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
       const current = tabs[0];
       if (current?.id && current.url && /^https?:/i.test(current.url))
         await checkCurrent(current.id, current.url);
+    };
+    document.getElementById("quick-details").onclick = () => {
+      const details = document.getElementById("quick-report-details");
+      const button = document.getElementById("quick-details");
+      const hidden = details.hasAttribute("hidden");
+      if (hidden) details.removeAttribute("hidden");
+      else details.setAttribute("hidden", "");
+      button.setAttribute("aria-expanded", String(hidden));
+      button.textContent = hidden ? "Hide Details" : "View Details";
     };
     document.getElementById("toggle").onclick = () => setProtection(false);
   }
@@ -137,8 +152,8 @@
     ${safeRouteHtml}
 
     <div class="btn-group">
-      <button class="button secondary" id="why" aria-expanded="false">Why this verdict?</button>
-      <button class="button secondary" id="full">Full Dashboard</button>
+      <button class="button secondary" id="why" aria-expanded="false">View Details</button>
+      <button class="button secondary" id="full">Full Report in Dashboard</button>
     </div>
 
     <section class="details" id="details" hidden>
@@ -156,7 +171,7 @@
   `);
     document.getElementById("full").onclick = () => {
       chrome.tabs.create({
-        url: `http://localhost:3000/investigations/${report.id}`
+        url: `${DASHBOARD_URL}/investigations/${encodeURIComponent(report.id)}`
       });
     };
     document.getElementById("why").onclick = () => {
@@ -166,7 +181,7 @@
       if (hidden) details.removeAttribute("hidden");
       else details.setAttribute("hidden", "");
       button.setAttribute("aria-expanded", String(hidden));
-      button.textContent = hidden ? "Hide details" : "Why this verdict?";
+      button.textContent = hidden ? "Hide Details" : "View Details";
     };
   }
   async function init() {
