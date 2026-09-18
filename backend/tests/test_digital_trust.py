@@ -92,30 +92,40 @@ def test_dynamic_trust_evaluation_endpoint():
 def test_calibrated_ml_model_bounds():
     """Calibrated XGBoost model returns valid probability between 0.0 and 1.0."""
     model = get_threat_model()
-    # High risk sample
-    pred_high = model.predict({
-        "url_length": 120,
-        "hostname_length": 45,
-        "subdomain_count": 3,
-        "ip_based_url": True,
-        "https": False,
-        "unusual_port": True,
-        "suspicious_keywords": ["login", "verify", "secure"],
-    })
+    # High risk sample - suspicious URL with phishing indicators
+    pred_high = model.predict_multimodal(
+        {
+            "url_length": 120,
+            "hostname_length": 45,
+            "subdomain_count": 3,
+            "ip_based_url": True,
+            "https": False,
+            "unusual_port": True,
+            "suspicious_keywords": ["login", "verify", "secure"],
+        },
+        domain_analysis={"tls": {"available": False}, "age_days": 5.0, "tls_mismatch": True},
+        page_analysis={"forms": 1, "password_inputs": 1, "login_like": True, "external_form_action": True, "urgency_text": True},
+        context={"brand_name_mismatch": True, "claimed_org_unverified": True},
+    )
     assert 0.0 <= pred_high.calibrated_probability <= 1.0
     assert pred_high.model_name == "xgboost-platt-calibrated"
     assert pred_high.calibration_method == "platt-scaling"
 
-    # Low risk sample
-    pred_low = model.predict({
-        "url_length": 22,
-        "hostname_length": 12,
-        "subdomain_count": 0,
-        "ip_based_url": False,
-        "https": True,
-        "unusual_port": False,
-        "suspicious_keywords": [],
-    })
+    # Low risk sample - clean URL with legitimate indicators
+    pred_low = model.predict_multimodal(
+        {
+            "url_length": 22,
+            "hostname_length": 12,
+            "subdomain_count": 0,
+            "ip_based_url": False,
+            "https": True,
+            "unusual_port": False,
+            "suspicious_keywords": [],
+        },
+        domain_analysis={"tls": {"available": True}, "age_days": 3650.0, "tls_mismatch": False},
+        page_analysis={"forms": 0, "password_inputs": 0, "login_like": False, "external_form_action": False, "urgency_text": False},
+        context={"brand_name_mismatch": False, "claimed_org_unverified": False},
+    )
     assert 0.0 <= pred_low.calibrated_probability <= 1.0
     assert pred_low.calibrated_probability < pred_high.calibrated_probability
 
