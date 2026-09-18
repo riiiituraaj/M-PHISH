@@ -18,6 +18,13 @@ type TabContext = {
 const API_ENDPOINTS = ["https://m-phish.onrender.com", "http://localhost:8000"];
 const TTL = 5 * 60 * 1000;
 const supported = (url?: string) => !!url && /^https?:\/\//i.test(url);
+const ignoredHost = (url: string) => {
+  try {
+    return ["m-phish.vercel.app", "m-phish.onrender.com", "localhost"].includes(new URL(url).hostname);
+  } catch {
+    return true;
+  }
+};
 const key = (url: string) => `result:${url}`;
 const contextKey = (tabId: number) => `context:${tabId}`;
 
@@ -216,7 +223,7 @@ chrome.webNavigation.onCommitted.addListener((details) => {
     .then(async (settings) => {
       if (settings.protectionEnabled === false) return;
       const url = details.url;
-      if (!supported(url)) return;
+      if (!supported(url) || ignoredHost(url)) return;
       const parsed = new URL(url);
       const prior = (settings[contextKey(details.tabId)] || {}) as TabContext;
       const next = {

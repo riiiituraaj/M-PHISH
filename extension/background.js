@@ -3,6 +3,13 @@
   var API_ENDPOINTS = ["https://m-phish.onrender.com", "http://localhost:8000"];
   var TTL = 5 * 60 * 1e3;
   var supported = (url) => !!url && /^https?:\/\//i.test(url);
+  var ignoredHost = (url) => {
+    try {
+      return ["m-phish.vercel.app", "m-phish.onrender.com", "localhost"].includes(new URL(url).hostname);
+    } catch {
+      return true;
+    }
+  };
   var key = (url) => `result:${url}`;
   var contextKey = (tabId) => `context:${tabId}`;
   function badge(tabId, text, color) {
@@ -167,7 +174,7 @@
     chrome.storage.local.get(["protectionEnabled", contextKey(details.tabId)]).then(async (settings) => {
       if (settings.protectionEnabled === false) return;
       const url = details.url;
-      if (!supported(url)) return;
+      if (!supported(url) || ignoredHost(url)) return;
       const parsed = new URL(url);
       const prior = settings[contextKey(details.tabId)] || {};
       const next = {
