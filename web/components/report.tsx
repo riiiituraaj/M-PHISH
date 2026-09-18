@@ -106,6 +106,10 @@ export function ContextGraph({ graph }: { graph?: Graph }) {
   const [focus, setFocus] = useState<string | null>(null);
   const nodes = graph?.nodes || [];
   const edges = graph?.edges || [];
+  const context = graph?.context || {};
+  const focusedNode = nodes.find((n) => n.id === focus);
+  const nodeProps = focusedNode ? (context[focusedNode.id] as Record<string, unknown> | undefined) : undefined;
+
   return (
     <div className="graph-shell">
       <div className="graph-toolbar">
@@ -118,16 +122,18 @@ export function ContextGraph({ graph }: { graph?: Graph }) {
       </div>
       {nodes.length ? (
         <div className="graph-canvas">
-          {nodes.map((node, index) => (
-            <button
-              key={node.id}
-              className={`graph-node graph-${node.type} ${focus === node.id ? "focused" : ""}`}
-              onClick={() => setFocus(focus === node.id ? null : node.id)}
-            >
-              <span className="graph-node-type">{node.type}</span>
-              <strong>{node.label}</strong>
-            </button>
-          ))}
+          <div className="graph-nodes">
+            {nodes.map((node, index) => (
+              <button
+                key={node.id}
+                className={`graph-node graph-${node.type} ${focus === node.id ? "focused" : ""}`}
+                onClick={() => setFocus(focus === node.id ? null : node.id)}
+              >
+                <span className="graph-node-type">{node.type}</span>
+                <strong>{node.label}</strong>
+              </button>
+            ))}
+          </div>
           <div className="graph-relationships">
             {edges.map((edge, index) => (
               <span key={`${edge.join("-")}-${index}`}>
@@ -140,6 +146,33 @@ export function ContextGraph({ graph }: { graph?: Graph }) {
         </div>
       ) : (
         <div className="empty-state">No contextual relationships discovered.</div>
+      )}
+      {focusedNode && (
+        <div className="graph-inspect-panel">
+          <div className="inspect-head">
+            <span className={`inspect-badge graph-${focusedNode.type}`}>{focusedNode.type}</span>
+            <h3>{focusedNode.label}</h3>
+            <button
+              className="inspect-close"
+              onClick={() => setFocus(null)}
+              aria-label="Close inspection"
+            >
+              <ChevronDown size={16} />
+            </button>
+          </div>
+          <dl className="inspect-props">
+            {nodeProps && Object.keys(nodeProps).length > 0 ? (
+              Object.entries(nodeProps).map(([key, value]) => (
+                <div key={key} className="inspect-prop">
+                  <dt>{key.replace(/_/g, " ")}</dt>
+                  <dd>{typeof value === "object" ? JSON.stringify(value, null, 2) : String(value)}</dd>
+                </div>
+              ))
+            ) : (
+              <p className="inspect-empty">No additional properties recorded for this entity.</p>
+            )}
+          </dl>
+        </div>
       )}
     </div>
   );
