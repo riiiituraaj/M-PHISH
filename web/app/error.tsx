@@ -1,2 +1,21 @@
-'use client'
-export default function ErrorPage({reset}:{error:Error&{digest?:string};reset:()=>void}){return <main><section className="glass panel" role="alert"><div className="eyebrow">Unable to load</div><h1 style={{fontFamily:'Manrope'}}>The investigation is unavailable.</h1><p className="subtle">The backend did not return this report. No risk result is being shown.</p><button onClick={reset}>Try again</button></section></main>}
+"use client";
+
+export default function ErrorPage({
+  reset,
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}) {
+  return (
+    <main>
+      <section className="surface panel" role="alert">
+        <div className="eyebrow">Unable to load</div>
+        <h1>The investigation is unavailable.</h1>
+        <p className="subtle">
+          The backend did not return this report. No risk result is being shown.
+        </p>
+        <button onClick={reset}>Try again</button>
+      </section>
+    </main>
+  );
+}

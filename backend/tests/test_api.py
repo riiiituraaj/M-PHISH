@@ -34,3 +34,11 @@ def test_versioned_investigation_is_queued_contract():
     investigation_id = response.json()['data']['id']
     status = client.get(f'/api/v1/investigations/{investigation_id}')
     assert status.json()['data']['status'] in {'ANALYZING', 'COMPLETED'}
+
+def test_versioned_investigation_persists_context_graph():
+    context = {'tab_id': 7, 'session_id': 'demo-session'}
+    response = client.post('/api/v1/investigations', json={'url': 'https://example.com', 'context': context})
+    investigation_id = response.json()['data']['id']
+    report = client.get(f'/api/v1/investigations/{investigation_id}/report').json()['data']
+    assert report['context'] == context
+    assert report['context_graph']['context'] == context
