@@ -3,6 +3,34 @@
 let isDismissedForSession = false;
 let currentTrustState: string = "TRUSTED";
 let currentReport: any = null;
+let extensionContextValid = true;
+
+function sendRuntimeMessage(
+  message: Record<string, unknown>,
+  callback: (response?: any) => void,
+) {
+  if (!extensionContextValid) return;
+  try {
+    if (!chrome.runtime?.id) {
+      extensionContextValid = false;
+      return;
+    }
+    chrome.runtime.sendMessage(message, (response) => {
+      try {
+        if (chrome.runtime.lastError) {
+          extensionContextValid = false;
+          return;
+        }
+      } catch {
+        extensionContextValid = false;
+        return;
+      }
+      callback(response);
+    });
+  } catch {
+    extensionContextValid = false;
+  }
+}
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "quick-result") {
@@ -55,7 +83,7 @@ function attachInteractionListeners() {
     const form = input.closest("form");
     const formAction = form ? form.action : "";
 
-    chrome.runtime.sendMessage(
+    sendRuntimeMessage(
       {
         type: "interaction-event",
         url: window.location.href,
@@ -81,7 +109,7 @@ function attachInteractionListeners() {
     if (!target || !target.href) return;
     const href = target.href.toLowerCase();
     if (href.match(/\.(exe|msi|bat|ps1|vbs|apk)$/)) {
-      chrome.runtime.sendMessage(
+      sendRuntimeMessage(
         {
           type: "interaction-event",
           url: window.location.href,

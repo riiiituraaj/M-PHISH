@@ -3,6 +3,30 @@
   var isDismissedForSession = false;
   var currentTrustState = "TRUSTED";
   var currentReport = null;
+  var extensionContextValid = true;
+  function sendRuntimeMessage(message, callback) {
+    if (!extensionContextValid) return;
+    try {
+      if (!chrome.runtime?.id) {
+        extensionContextValid = false;
+        return;
+      }
+      chrome.runtime.sendMessage(message, (response) => {
+        try {
+          if (chrome.runtime.lastError) {
+            extensionContextValid = false;
+            return;
+          }
+        } catch {
+          extensionContextValid = false;
+          return;
+        }
+        callback(response);
+      });
+    } catch {
+      extensionContextValid = false;
+    }
+  }
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type === "quick-result") {
       document.documentElement.dataset.mPhishRisk = message.quick.tier;
@@ -44,7 +68,7 @@
       if (!actionType) return;
       const form = input.closest("form");
       const formAction = form ? form.action : "";
-      chrome.runtime.sendMessage(
+      sendRuntimeMessage(
         {
           type: "interaction-event",
           url: window.location.href,
@@ -68,7 +92,7 @@
       if (!target || !target.href) return;
       const href = target.href.toLowerCase();
       if (href.match(/\.(exe|msi|bat|ps1|vbs|apk)$/)) {
-        chrome.runtime.sendMessage(
+        sendRuntimeMessage(
           {
             type: "interaction-event",
             url: window.location.href,
