@@ -1,23 +1,102 @@
 (() => {
   // src/popup.ts
-  var API_ENDPOINTS = ["https://m-phish.onrender.com", "http://localhost:8000"];
-  var DASHBOARD_URL = "https://m-phish.vercel.app";
+  var API_ENDPOINTS = ["https://m-phish.onrender.com"];
+  var DEFAULT_DASHBOARD = "https://m-phish.vercel.app";
+  var LOCAL_DASHBOARD = "http://localhost:3000";
   var root = document.getElementById("app");
-  var escape = (value) => (value || "").replace(
-    /[&<>"']/g,
-    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]
+  var activeBase = null;
+  var dashboardOverride = null;
+  var escape = (value) => (value || "").replace(/[&<>"']/g, (c) => {
+    const map = { "&": "&", "<": "<", ">": ">", '"': '"', "'": "'" };
+    return map[c];
+  });
+  var icon = (paths, size = 13) => `<svg class="icon" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+  var ICON_EXTERNAL = icon(
+    '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/>'
   );
+  var ICON_CHEVRON = icon('<path d="m6 9 6 6 6-6"/>', 14);
+  var ICON_CHECK = icon('<path d="M20 6 9 17l-5-5"/>', 12);
+  var ICON_SHIELD = icon('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>', 14);
+  var ICON_REFRESH = icon('<path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>', 13);
+  var ICON_SAFE = icon('<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4 12 14.01l-3-3"/>', 13);
+  var ICON_ALERT = icon('<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/>', 14);
+  var TONE_TITLE = {
+    trusted: "Looks trustworthy",
+    caution: "Caution advised",
+    "high-risk": "High risk detected",
+    stop: "Stop before you continue"
+  };
+  function dashboardBase() {
+    if (dashboardOverride) return dashboardOverride.replace(/\/+$/, "");
+    if (activeBase && activeBase.includes("localhost")) return LOCAL_DASHBOARD;
+    return DEFAULT_DASHBOARD;
+  }
+  function openDashboard(path = "") {
+    chrome.tabs.create({ url: `${dashboardBase()}${path}` });
+  }
+  function header() {
+    return `
+    <header class="header">
+      <div class="brand">
+        <span class="brand-mark">${ICON_SHIELD}</span>
+        <span class="brand-name">M-PHISH <b>X</b></span>
+      </div>
+    </header>`;
+  }
   function shell(body) {
-    root.innerHTML = `<div class="card"><div class="topbar"><div class="brand"><img src="icon.svg" alt=""><span>M-PHISH <b>X</b></span></div><button class="dashboard-link" id="dashboard" type="button">Dashboard <span aria-hidden="true">\u2197</span></button></div>${body}</div>`;
-    document.getElementById("dashboard").onclick = () => {
-      chrome.tabs.create({ url: DASHBOARD_URL });
-    };
+    root.innerHTML = `<div class="popup">${header()}<div class="content">${body}</div></div>`;
+  }
+  function row(label, value, options) {
+    return `<div class="row"><span class="row-label">${escape(label)}</span><span class="row-value${options?.mono ? " mono" : ""}">${escape(value)}</span></div>`;
+  }
+  function scoreBlock(score, tone, pillLabel, caption) {
+    const bounded = Math.max(0, Math.min(100, score));
+    return `
+    <section class="score">
+      <div class="score-head">
+        <span class="label">Digital trust score</span>
+        <span class="pill ${tone}">${escape(pillLabel)}</span>
+      </div>
+      <div class="score-value"><strong>${bounded}</strong><span>/100</span></div>
+      <div class="meter" role="img" aria-label="Trust score ${bounded} out of 100">
+        <span class="meter-fill ${tone}" style="width:${Math.max(3, bounded)}%"></span>
+      </div>
+      <p class="score-caption">${escape(caption)}</p>
+    </section>`;
+  }
+  function statusBanner(tone) {
+    return `
+    <div class="banner ${tone}">
+      <span class="banner-dot" aria-hidden="true"></span>
+      <b>${escape(TONE_TITLE[tone])}</b>
+    </div>`;
+  }
+  function footer(protectionEnabled = true) {
+    return `
+    <footer class="footer">
+      <button class="text-action" id="protection" type="button">
+        ${protectionEnabled ? "Pause protection" : "Resume protection"}
+      </button>
+      <span class="footer-note">No passwords, cookies or keystrokes are read.</span>
+    </footer>`;
+  }
+  function bindFooter(protectionEnabled = true) {
+    const button = document.getElementById("protection");
+    if (button) button.onclick = () => setProtection(!protectionEnabled);
   }
   function renderOff() {
-    shell(
-      '<div class="eyebrow">Protection is off</div><p class="summary">M-PHISH X is not monitoring browser navigation.</p><button class="button" id="toggle">Turn On</button>'
-    );
-    document.getElementById("toggle").onclick = () => setProtection(true);
+    shell(`
+    <section class="state">
+      <span class="state-icon">${ICON_SHIELD}</span>
+      <h1>Protection is paused</h1>
+      <p class="lede">M-PHISH X is not reviewing the sites you visit. Nothing is being analysed or stored.</p>
+    </section>
+    <div class="actions">
+      <button class="button primary" id="resume" type="button">Resume protection</button>
+    </div>
+    ${footer(false)}`);
+    document.getElementById("resume").onclick = () => setProtection(true);
+    bindFooter(false);
   }
   function setProtection(enabled) {
     chrome.storage.local.set({ protectionEnabled: enabled }).then(init);
@@ -28,25 +107,46 @@
       try {
         const response = await fetch(`${base}${path}`, options);
         if (response.ok) {
+          activeBase = base;
           return (await response.json()).data;
         }
-      } catch (e) {
-        lastError = e instanceof Error ? e : new Error(String(e));
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
       }
     }
-    throw lastError || new Error("Backend connection failed.");
+    throw lastError || new Error("The analysis service is unreachable.");
   }
-  async function checkCurrent(tabId, url) {
-    shell(
-      '<div class="progress"><b>\u25CF</b> Digital Identity<br><b>\u25CF</b> Website Authenticity<br><b>\u25CF</b> Behavior & Privacy<br><span>\u25CB</span> Digital Trust Profile</div>'
-    );
+  function hostOf(url) {
+    try {
+      return new URL(url).hostname;
+    } catch {
+      return url;
+    }
+  }
+  function renderLoading(host) {
+    shell(`
+    <div class="loading">
+      <span class="spinner" aria-hidden="true"></span>
+      <div>
+        <p class="loading-title">Analysing ${escape(host)}</p>
+        <p class="loading-note">Checking identity, page signals and behaviour.</p>
+      </div>
+    </div>
+    <div class="skeleton" aria-hidden="true">
+      <span class="skeleton-line w80"></span>
+      <span class="skeleton-line w60"></span>
+      <span class="skeleton-line w40"></span>
+    </div>`);
+  }
+  async function checkCurrent(tabId, url, forceDeep = false) {
+    renderLoading(hostOf(url));
     try {
       const quick = await request("/api/v1/quick-check", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url, context: { tab_id: tabId } })
       });
-      if (!quick.deep_required) {
+      if (!quick.deep_required && !forceDeep) {
         renderReady(url, quick);
         return;
       }
@@ -63,140 +163,202 @@
           showReport(status);
           return;
         }
-        if (status.status === "FAILED") throw new Error("Investigation failed");
+        if (status.status === "FAILED") throw new Error("The investigation did not complete.");
         await new Promise((resolve) => setTimeout(resolve, 250));
       }
-      throw new Error("Investigation timed out");
+      throw new Error("The investigation timed out.");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Service unreachable";
-      shell(
-        `<p class="summary">${escape(message)}. Confirm the M-PHISH X backend is running.</p><button class="button secondary" id="retry">Try again</button>`
-      );
-      document.getElementById("retry").onclick = () => checkCurrent(tabId, url);
+      const message = error instanceof Error ? error.message : "Service unreachable.";
+      renderError(message, () => checkCurrent(tabId, url, forceDeep));
     }
   }
+  function renderError(message, retry) {
+    shell(`
+    <section class="state">
+      <span class="state-icon">${ICON_ALERT}</span>
+      <h1>No result yet</h1>
+      <p class="lede">${escape(message)}</p>
+      <p class="lede subtle">Confirm the M-PHISH X backend is running, then try again.</p>
+    </section>
+    <div class="actions">
+      <button class="button primary" id="retry" type="button">
+        ${ICON_REFRESH} Try again
+      </button>
+    </div>
+    ${footer()}`);
+    document.getElementById("retry").onclick = retry;
+    bindFooter();
+  }
   function renderReady(url, quick) {
-    const host = new URL(url).hostname;
+    const host = hostOf(url);
     const trustScore = Math.max(0, Math.min(100, 100 - quick.score));
-    const state = quick.tier === "LOW" ? "trusted" : quick.tier === "MEDIUM" ? "caution" : "high-risk";
-    const stateTitle = quick.tier === "LOW" ? "Website appears trustworthy" : quick.tier === "MEDIUM" ? "CAUTION ADVISED" : "HIGH RISK DETECTED";
-    const dot = quick.tier === "LOW" ? "green" : quick.tier === "MEDIUM" ? "amber" : "orange";
-    const reasons = quick.top_reasons.length ? quick.top_reasons.map((reason) => `<div class="detail"><b>${escape(reason)}</b><span>URL signal</span></div>`).join("") : `<div class="detail"><b>No suspicious URL signals detected</b><span>URL analysis</span></div>`;
-    shell(
-      `<div class="state-banner ${state}"><span class="dot ${dot}"></span> ${escape(stateTitle)}</div><div class="host">${escape(host)}</div><div class="trust-score-row"><div><span class="trust-label">Digital Trust</span><div class="trust-val">${trustScore}<small> / 100</small></div></div><span class="trust-pill ${state}">${escape(quick.tier)}</span></div><div class="trust-grid"><div class="trust-dim"><span>URL risk</span><b>${quick.score}/100</b></div><div class="trust-dim"><span>Signals</span><b>${quick.top_reasons.length}</b></div><div class="trust-dim"><span>Analysis</span><b>Quick</b></div><div class="trust-dim"><span>Deep scan</span><b>Available</b></div></div><div class="btn-group"><button class="button" id="check">Run Full Investigation</button><button class="button secondary" id="quick-details" aria-expanded="false">View Details</button></div><section class="details" id="quick-report-details" hidden><h2>URL Analysis</h2>${reasons}<div class="detail-url">${escape(url)}</div></section><button class="button secondary" id="toggle">Turn Off Protection</button>`
-    );
+    const tone = quick.tier === "LOW" ? "trusted" : quick.tier === "MEDIUM" ? "caution" : "high-risk";
+    const signals = quick.top_reasons.length ? quick.top_reasons.map((reason) => `<div class="evidence"><b>${escape(reason)}</b><span>URL signal</span></div>`).join("") : `<div class="evidence"><b>No suspicious URL signals</b><span>URL analysis</span></div>`;
+    shell(`
+    ${statusBanner(tone)}
+    <div class="target">
+      <p class="target-host">${escape(host)}</p>
+      <p class="target-url">${escape(url)}</p>
+    </div>
+
+    ${scoreBlock(
+      trustScore,
+      tone,
+      quick.tier,
+      "URL signals only. Run a full investigation to weigh page, identity and behaviour evidence."
+    )}
+
+    <div class="rows">
+      ${row("URL risk", `${quick.score} / 100`)}
+      ${row("Signals raised", String(quick.top_reasons.length))}
+      ${row("Analysis", "Quick URL check")}
+    </div>
+
+    <div class="actions">
+      <button class="button primary" id="check" type="button">Run full investigation</button>
+      <button class="button ghost" id="open-dashboard-ready" type="button">
+        ${ICON_EXTERNAL} View full report on dashboard
+      </button>
+      <button class="button ghost" id="view-signals" type="button">View details</button>
+    </div>
+
+    ${disclosure("quick-signals", "URL signals", `<div class="evidence-list">${signals}</div>`)}
+
+    ${footer()}`);
     document.getElementById("check").onclick = async () => {
       const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
       const current = tabs[0];
       if (current?.id && current.url && /^https?:/i.test(current.url))
-        await checkCurrent(current.id, current.url);
+        await checkCurrent(current.id, current.url, true);
     };
-    document.getElementById("quick-details").onclick = () => {
-      const details = document.getElementById("quick-report-details");
-      const button = document.getElementById("quick-details");
-      const hidden = details.hasAttribute("hidden");
-      if (hidden) details.removeAttribute("hidden");
-      else details.setAttribute("hidden", "");
-      button.setAttribute("aria-expanded", String(hidden));
-      button.textContent = hidden ? "Hide Details" : "View Details";
+    document.getElementById("open-dashboard-ready").onclick = () => openDashboard(`/investigations/${encodeURIComponent(url)}`);
+    document.getElementById("view-signals").onclick = () => {
+      const toggle = document.getElementById("quick-signals");
+      const panel = document.getElementById("quick-signals-panel");
+      if (toggle && panel) {
+        const open = panel.hasAttribute("hidden");
+        if (open) {
+          panel.removeAttribute("hidden");
+          toggle.setAttribute("aria-expanded", "true");
+          toggle.classList.add("open");
+        }
+      }
     };
-    document.getElementById("toggle").onclick = () => setProtection(false);
+    bindDisclosure("quick-signals");
+    bindFooter();
+  }
+  function toneOf(state) {
+    if (state === "STOP") return "stop";
+    if (state === "HIGH_RISK") return "high-risk";
+    if (state === "CAUTION") return "caution";
+    return "trusted";
   }
   function showReport(report) {
     const profile = report.digital_trust_profile;
     const identity = report.identity_analysis;
     const trustState = profile?.trust_state || (report.risk_score >= 50 ? "STOP" : "CAUTION");
     const overallTrust = profile ? profile.overall_trust : Math.max(10, 100 - report.risk_score);
-    let stateBannerClass = "trusted";
-    let stateTitle = "Website appears trustworthy";
-    let stateDot = "green";
-    if (trustState === "STOP") {
-      stateBannerClass = "stop";
-      stateTitle = "STOP BEFORE YOU ENTER";
-      stateDot = "red";
-    } else if (trustState === "HIGH_RISK") {
-      stateBannerClass = "high-risk";
-      stateTitle = "HIGH RISK DETECTED";
-      stateDot = "orange";
-    } else if (trustState === "CAUTION") {
-      stateBannerClass = "caution";
-      stateTitle = "CAUTION ADVISED";
-      stateDot = "amber";
-    }
-    const identityHtml = identity ? `
-      <div class="identity-box">
-        <div class="identity-header">WHO AM I GIVING THIS TO?</div>
-        <div class="identity-row"><span>Claimed Service</span><b>${escape(identity.claimed_service)}</b></div>
-        <div class="identity-row"><span>Current Host</span><code>${escape(identity.current_website)}</code></div>
-        <div class="identity-row"><span>Data Destination</span><code>${escape(identity.credential_destination)}</code></div>
-        <div class="identity-row"><span>Consistency</span><b class="consist-${identity.identity_consistency.toLowerCase()}">${escape(identity.identity_consistency)}</b></div>
-      </div>
-    ` : "";
-    const safeRouteHtml = report.safe_route ? `<a class="button action-safe" href="${escape(report.safe_route)}" target="_blank">Open Verified Official Site</a>` : "";
+    const tone = toneOf(trustState);
+    const identityRows = identity ? `<section class="card">
+         <div class="card-head">
+           <span class="label">Who am I giving this to?</span>
+           <span class="pill ${identity.identity_consistency === "HIGH" ? "trusted" : tone}">${escape(
+      identity.identity_consistency
+    )}</span>
+         </div>
+         <div class="rows">
+           ${row("Claimed service", identity.claimed_service || "Not stated")}
+           ${row("Current host", identity.current_website || report.hostname, { mono: true })}
+           ${row("Data destination", identity.credential_destination || "Not detected", { mono: true })}
+         </div>
+         ${identity.explanation ? `<p class="card-note">${escape(identity.explanation)}</p>` : ""}
+       </section>` : "";
+    const safeRoute = report.safe_route || identity?.safe_route || null;
+    const safeRouteButton = safeRoute ? `<a class="button safe" href="${escape(safeRoute)}" target="_blank" rel="noopener noreferrer">
+         ${ICON_SAFE} Open official site
+       </a>` : "";
+    const evidence = report.evidence.length ? report.evidence.slice(0, 6).map(
+      (item) => `
+          <div class="evidence">
+            <b>${escape(item.title)}</b>
+            <span>${escape(item.category)} \xB7 ${Math.round(item.confidence * 100)}% confidence</span>
+            <p>${escape(item.description)}</p>
+          </div>`
+    ).join("") : `<div class="evidence"><b>No anomalous evidence recorded</b><span>Engine output</span></div>`;
     shell(`
-    <div class="state-banner ${stateBannerClass}">
-      <span class="dot ${stateDot}"></span>
-      <b>${escape(stateTitle)}</b>
-    </div>
-    <div class="host">${escape(report.hostname)}</div>
-
-    <div class="trust-score-row">
-      <div>
-        <span class="trust-label">Digital Trust Score</span>
-        <div class="trust-val">${overallTrust}<small> / 100</small></div>
-      </div>
-      <span class="trust-pill ${stateBannerClass}">${escape(trustState.replace("_", " "))}</span>
+    ${statusBanner(tone)}
+    <div class="target">
+      <p class="target-host">${escape(report.hostname)}</p>
+      <p class="target-url">${escape(report.url)}</p>
     </div>
 
-    ${identityHtml}
+    ${scoreBlock(
+      overallTrust,
+      tone,
+      trustState.replace("_", " "),
+      profile?.state_reason || report.recommendation
+    )}
 
-    <p class="summary">${escape(report.what_happened || report.summary)}</p>
+    ${identityRows}
 
-    ${safeRouteHtml}
-
-    <div class="btn-group">
-      <button class="button secondary" id="why" aria-expanded="false">View Details</button>
-      <button class="button secondary" id="full">Full Report in Dashboard</button>
-    </div>
-
-    <section class="details" id="details" hidden>
-      <h2>What Should I Do?</h2>
-      <div class="recommendation">
-        <p>${escape(report.what_to_do || report.recommendation)}</p>
-      </div>
-
-      <h2>Evidence Attribution</h2>
-      ${report.evidence.slice(0, 5).map(
-      (e) => `<div class="detail"><b>${escape(e.title)}</b><span>${escape(e.category)} \xB7 ${Math.round(e.confidence * 100)}% confidence</span><p>${escape(e.description)}</p></div>`
-    ).join("")}
-      <div class="detail-url">${escape(report.url)}</div>
+    <section class="card">
+      <span class="label">What happened</span>
+      <p class="card-note">${escape(report.what_happened || report.summary)}</p>
     </section>
-  `);
-    document.getElementById("full").onclick = () => {
-      chrome.tabs.create({
-        url: `${DASHBOARD_URL}/investigations/${encodeURIComponent(report.id)}`
-      });
+
+    <div class="actions">
+      ${safeRouteButton}
+      <button class="button primary" id="full-report" type="button">
+        ${ICON_EXTERNAL} View full report on dashboard
+      </button>
+      <button class="button ghost" id="refresh" type="button">
+        ${ICON_REFRESH} Re-check this page
+      </button>
+    </div>
+
+    ${disclosure(
+      "report-details",
+      `Evidence and next steps (${report.evidence.length})`,
+      `<div class="recommendation">${escape(report.what_to_do || report.recommendation)}</div>
+       <div class="evidence-list">${evidence}</div>
+       <p class="target-url mono">${escape(report.id)}</p>`
+    )}
+
+    ${footer()}`);
+    document.getElementById("full-report").onclick = () => openDashboard(`/investigations/${encodeURIComponent(report.id)}`);
+    document.getElementById("refresh").onclick = async () => {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      const current = tabs[0];
+      if (current?.id && current.url && /^https?:/i.test(current.url))
+        await checkCurrent(current.id, current.url);
     };
-    document.getElementById("why").onclick = () => {
-      const details = document.getElementById("details");
-      const button = document.getElementById("why");
-      const hidden = details.hasAttribute("hidden");
-      if (hidden) details.removeAttribute("hidden");
-      else details.setAttribute("hidden", "");
-      button.setAttribute("aria-expanded", String(hidden));
-      button.textContent = hidden ? "Hide Details" : "View Details";
-    };
+    bindDisclosure("report-details");
+    bindFooter();
   }
   async function init() {
-    const settings = await chrome.storage.local.get(["protectionEnabled"]);
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const tab = tabs[0];
+    const settings = await chrome.storage.local.get(["protectionEnabled", "dashboardUrl"]);
+    dashboardOverride = typeof settings.dashboardUrl === "string" && settings.dashboardUrl.trim() ? settings.dashboardUrl.trim() : null;
     if (settings.protectionEnabled === false) {
       renderOff();
       return;
     }
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tab = tabs[0];
     if (!tab?.id || !tab.url || !/^https?:/i.test(tab.url)) {
-      shell('<p class="summary">Open a regular website to inspect with M-PHISH X.</p>');
+      shell(`
+      <section class="state">
+        <span class="state-icon">${ICON_CHECK}</span>
+        <h1>Open a website to inspect it</h1>
+        <p class="lede">This tab is not a regular web page, so there is nothing to analyse yet.</p>
+      </section>
+      <div class="actions">
+        <button class="button primary" id="refresh" type="button">
+          ${ICON_REFRESH} Re-check
+        </button>
+      </div>
+      ${footer()}`);
+      document.getElementById("refresh").onclick = init;
+      bindFooter();
       return;
     }
     const saved = await chrome.storage.local.get(`report:${tab.id}`);
@@ -207,4 +369,23 @@
     }
   }
   init();
+  function disclosure(id, label, content) {
+    return `
+    <button class="disclosure-toggle" id="${id}" type="button" aria-expanded="false" aria-controls="${id}-panel">
+      <span>${escape(label)}</span>${ICON_CHEVRON}
+    </button>
+    <section class="disclosure" id="${id}-panel" hidden>${content}</section>`;
+  }
+  function bindDisclosure(id) {
+    const toggle = document.getElementById(id);
+    const panel = document.getElementById(`${id}-panel`);
+    if (!toggle || !panel) return;
+    toggle.onclick = () => {
+      const open = panel.hasAttribute("hidden");
+      if (open) panel.removeAttribute("hidden");
+      else panel.setAttribute("hidden", "");
+      toggle.setAttribute("aria-expanded", String(open));
+      toggle.classList.toggle("open", open);
+    };
+  }
 })();

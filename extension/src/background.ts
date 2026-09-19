@@ -15,7 +15,7 @@ type TabContext = {
 };
 
 // Auto-fallback between local backend and production endpoint
-const API_ENDPOINTS = ["https://m-phish.onrender.com", "http://localhost:8000"];
+const API_ENDPOINTS = ["https://m-phish.onrender.com"];
 const TTL = 5 * 60 * 1000;
 const supported = (url?: string) => !!url && /^https?:\/\//i.test(url);
 const ignoredHost = (url: string) => {

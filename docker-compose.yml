@@ -13,4 +13,4 @@ services:
     command: sh -c "npm install && npm run dev"
     ports: ["3000:3000"]
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_API_URL: https://m-phish.onrender.com

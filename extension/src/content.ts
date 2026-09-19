@@ -129,7 +129,24 @@ function attachInteractionListeners() {
   });
 }
 
-function showTrustBeforeYouActBanner(data: any, focusedElement?: HTMLElement) {
+type InterventionContext = {
+  field_label?: string;
+  form_action?: string;
+  download_url?: string;
+};
+
+function hostOf(value: string) {
+  try {
+    return new URL(value).hostname;
+  } catch {
+    return value;
+  }
+}
+
+function showTrustBeforeYouActBanner(
+  data: any,
+  context: InterventionContext = {},
+) {
   if (document.getElementById("m-phish-shield-root")) return;
 
   const container = document.createElement("div");
@@ -139,80 +156,137 @@ function showTrustBeforeYouActBanner(data: any, focusedElement?: HTMLElement) {
   const shadow = container.attachShadow({ mode: "open" });
 
   const modal = data.intervention_modal || {};
-  const title = modal.title || "Before you enter credentials";
-  const message = modal.message || "This website has not established verifiable trust.";
-  const recommendation = modal.recommended_action || "We recommend not entering sensitive information here.";
-  const safeRoute = modal.safe_route || null;
+  const profile = data.digital_trust_profile || {};
+  const identity = data.identity_analysis || {};
+  const title = modal.title || "Before you continue";
+  const message =
+    modal.message ||
+    profile.state_reason ||
+    "This page has not established verifiable trust.";
+  const recommendation =
+    modal.recommended_action ||
+    "Do not enter credentials or payment details on this page.";
+  const safeRoute = modal.safe_route || data.safe_route || null;
+
+  const facts = (
+    [
+      context.field_label ? ["Interaction", context.field_label] : null,
+      context.form_action ? ["Data sent to", hostOf(context.form_action)] : null,
+      context.download_url ? ["Download from", hostOf(context.download_url)] : null,
+      identity.claimed_service ? ["Claims to be", identity.claimed_service] : null,
+      profile.trust_state
+        ? ["Trust state", String(profile.trust_state).replace("_", " ")]
+        : null,
+    ] as (string[] | null)[]
+  ).filter(Boolean) as string[][];
+
+  const factsHtml = facts
+    .map(
+      ([label, value]) =>
+        `<div class="fact"><span>${escapeHtml(label)}</span><b>${escapeHtml(value)}</b></div>`,
+    )
+    .join("");
+
+  const notes = [
+    identity.is_impersonation_suspected
+      ? "The page presents another organisation's identity."
+      : null,
+    identity.explanation || null,
+    profile.state_reason || null,
+  ].filter(Boolean) as string[];
+
+  const notesHtml = notes.map((note) => `<p>${escapeHtml(note)}</p>`).join("");
 
   shadow.innerHTML = `
     <style>
       :host {
         all: initial;
         position: fixed;
-        bottom: 24px;
-        right: 24px;
+        bottom: 20px;
+        right: 20px;
         z-index: 2147483647;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        color: #e6edf0;
+        color: #e9f1fb;
       }
       .shield-card {
-        width: 380px;
-        background: rgba(17, 22, 28, 0.96);
-        backdrop-filter: blur(20px);
-        -webkit-backdrop-filter: blur(20px);
-        border: 1px solid rgba(196, 73, 73, 0.4);
-        border-radius: 12px;
-        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
-        padding: 18px 20px;
+        width: 372px;
+        padding: 16px;
+        border: 1px solid rgba(248, 113, 113, 0.34);
+        border-radius: 14px;
+        background: rgba(12, 20, 33, 0.97);
+        backdrop-filter: blur(18px);
+        -webkit-backdrop-filter: blur(18px);
+        box-shadow: 0 18px 44px rgba(0, 0, 0, 0.48);
         box-sizing: border-box;
-        animation: mPhishSlideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+        animation: mPhishSlideUp 0.24s cubic-bezier(0.16, 1, 0.3, 1);
       }
       @keyframes mPhishSlideUp {
-        from { opacity: 0; transform: translateY(12px); }
+        from { opacity: 0; transform: translateY(10px); }
         to { opacity: 1; transform: translateY(0); }
       }
-      .header {
+      .head {
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 9px;
         margin-bottom: 10px;
       }
-      .indicator {
-        width: 10px;
-        height: 10px;
+      .mark {
+        width: 7px;
+        height: 7px;
         border-radius: 50%;
-        background: #e25555;
-        box-shadow: 0 0 10px rgba(226, 85, 85, 0.6);
+        background: #f87171;
       }
       .title {
-        font-size: 14px;
-        font-weight: 600;
+        font-size: 13.5px;
+        font-weight: 620;
         color: #ffffff;
         letter-spacing: -0.01em;
       }
       .brand-tag {
         margin-left: auto;
-        font-size: 10px;
+        font-size: 9.5px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
         text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: #8b9aa3;
-        font-weight: 600;
+        color: #6b809a;
       }
       .message {
-        font-size: 12.5px;
-        line-height: 1.5;
-        color: #b0bec5;
-        margin: 0 0 12px 0;
+        margin: 0 0 12px;
+        font-size: 12px;
+        line-height: 1.55;
+        color: #98adc6;
+      }
+      .facts {
+        display: flex;
+        flex-direction: column;
+        margin-bottom: 12px;
+      }
+      .fact {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 7px 0;
+        border-bottom: 1px solid rgba(140, 172, 204, 0.14);
+        font-size: 11.5px;
+      }
+      .fact:last-child { border-bottom: 0; }
+      .fact span { color: #6b809a; }
+      .fact b {
+        font-weight: 620;
+        color: #e9f1fb;
+        text-align: right;
+        overflow-wrap: anywhere;
       }
       .recommendation {
-        font-size: 12px;
-        line-height: 1.45;
-        background: rgba(196, 73, 73, 0.12);
-        border-left: 3px solid #e25555;
-        padding: 8px 10px;
-        border-radius: 4px;
-        color: #ffcccc;
         margin-bottom: 14px;
+        padding: 10px 12px;
+        border-left: 2px solid #f87171;
+        border-radius: 0 8px 8px 0;
+        background: rgba(248, 113, 113, 0.1);
+        color: #fecaca;
+        font-size: 11.5px;
+        line-height: 1.5;
       }
       .actions {
         display: flex;

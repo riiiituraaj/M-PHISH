@@ -202,7 +202,7 @@ export type DemoScenario = {
   safe_route?: string;
 };
 
-const api = () => process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const api = () => process.env.NEXT_PUBLIC_API_URL || "https://m-phish.onrender.com";
 
 function normalizeUrl(value: string) {
   const trimmed = value.trim();

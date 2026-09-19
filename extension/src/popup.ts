@@ -64,7 +64,7 @@ type Envelope<T> = { success: boolean; data: T; request_id: string };
 type Job = { id: string; status: string };
 type Tone = "trusted" | "caution" | "high-risk" | "stop";
 
-const API_ENDPOINTS = ["https://m-phish.onrender.com", "http://localhost:8000"];
+const API_ENDPOINTS = ["https://m-phish.onrender.com"];
 const DEFAULT_DASHBOARD = "https://m-phish.vercel.app";
 const LOCAL_DASHBOARD = "http://localhost:3000";
 
