@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -12,6 +13,7 @@ class Settings:
     investigation_rate_limit: int = int(os.getenv("INVESTIGATION_RATE_LIMIT", "30"))
     rate_window_seconds: int = int(os.getenv("RATE_WINDOW_SECONDS", "60"))
     database_url: str = os.getenv("DATABASE_URL", "sqlite:///m_phish.db")
+    database_path: str = os.getenv("SQLITE_DB_PATH", str(Path(__file__).resolve().parents[2] / "m_phish.db"))
     api_key: str = os.getenv("M_PHISH_API_KEY", "")
     ai_provider: str = os.getenv("AI_PROVIDER", "fallback")
     groq_api_key: str = os.getenv("GROQ_API_KEY", "")

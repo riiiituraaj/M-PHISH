@@ -556,6 +556,13 @@ export function ReportWorkspace({ report }: { report: ReportData }) {
                 {report.ml_prediction?.model_name || "Calibrated XGBoost"}
               </span>
             </div>
+            <div className="surface" style={{ padding: 14, marginBottom: 14, border: "1px solid var(--line)" }}>
+              <div className="subtle-kicker">Model provenance</div>
+              <p className="subtle" style={{ margin: "7px 0 0", lineHeight: 1.55 }}>
+                Training source: <b>{report.ml_prediction?.training_data || "Development benchmark"}</b>.
+                This model is {report.ml_prediction?.production_ready ? "externally benchmarked but still requires deployment approval" : "development-only and should not be treated as production-validated"}.
+              </p>
+            </div>
             <div className="ml-metrics-grid">
               <div className="ml-metric">
                 <span>P(Phishing) Probability</span>
@@ -574,6 +581,20 @@ export function ReportWorkspace({ report }: { report: ReportData }) {
                 <b>{report.ml_prediction?.is_phishing ? "FLAGGED PHISHING" : "BENIGN"}</b>
               </div>
             </div>
+
+            {report.ml_prediction?.local_attribution && (
+              <div className="ml-contributions" style={{ marginTop: 16 }}>
+                <span className="subtle-kicker">Local probability-delta attribution</span>
+                <div className="contrib-row">
+                  {Object.entries(report.ml_prediction.local_attribution).slice(0, 6).map(([feature, value]) => (
+                    <div key={feature} className="contrib-item">
+                      <span>{feature.replace(/_/g, " ")}</span>
+                      <b>{value > 0 ? "+" : ""}{value}</b>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {report.ml_prediction?.feature_contributions && (
               <div className="ml-contributions">

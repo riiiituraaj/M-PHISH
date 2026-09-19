@@ -1,3 +1,5 @@
+from pathlib import Path
+import csv
 import numpy as np
 
 FEATURE_NAMES = [
@@ -144,3 +146,41 @@ def generate_synthetic_dataset(n_samples: int = 1200, random_state: int = 42) ->
     indices = rng.permutation(len(y))
     return X[indices], y[indices]
 
+
+
+def load_external_dataset(path: str | None) -> tuple[np.ndarray, np.ndarray, str]:
+    """Load an independently sourced CSV benchmark when configured.
+
+    Expected schema: one column named ``label`` (0/1) plus any subset of FEATURE_NAMES.
+    Missing feature columns are filled with neutral defaults. The file is intentionally
+    external to the repository so users cannot confuse demo data with real-world evidence.
+    """
+    if not path:
+        X, y = generate_synthetic_dataset(n_samples=2000, random_state=42)
+        return X, y, "synthetic-development-benchmark"
+    csv_path = Path(path)
+    if not csv_path.exists():
+        raise FileNotFoundError(f"Configured phishing dataset not found: {csv_path}")
+    rows = list(csv.DictReader(csv_path.open("r", encoding="utf-8", newline="")))
+    if not rows or "label" not in rows[0]:
+        raise ValueError("External benchmark CSV must contain a 'label' column.")
+    X = np.zeros((len(rows), len(FEATURE_NAMES)), dtype=np.float32)
+    y = np.zeros(len(rows), dtype=np.int32)
+    for row_idx, row in enumerate(rows):
+        try:
+            y[row_idx] = int(float(row["label"]))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid label at row {row_idx + 2}") from exc
+        if y[row_idx] not in (0, 1):
+            raise ValueError(f"Labels must be 0 or 1; row {row_idx + 2} has {y[row_idx]}")
+        for col_idx, name in enumerate(FEATURE_NAMES):
+            value = row.get(name)
+            if value in (None, ""):
+                continue
+            try:
+                X[row_idx, col_idx] = float(value)
+            except ValueError as exc:
+                raise ValueError(f"Invalid numeric value for '{name}' at row {row_idx + 2}") from exc
+    if len(np.unique(y)) < 2:
+        raise ValueError("External benchmark must contain both benign (0) and phishing (1) labels.")
+    return X, y, f"external-csv:{csv_path.name}"

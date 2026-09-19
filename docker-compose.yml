@@ -1,11 +1,15 @@
 services:
   backend:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     ports: ["8000:8000"]
     environment:
       ENABLE_PLAYWRIGHT: "false"
       CRAWLER_TIMEOUT_SECONDS: "15"
       MAX_REDIRECTS: "5"
+      MAX_CRAWLER_REQUESTS: "100"
+      SQLITE_DB_PATH: /app/data/m_phish.db
   web:
     image: node:20-alpine
     working_dir: /app

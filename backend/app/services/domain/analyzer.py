@@ -7,6 +7,16 @@ def analyze(url: str, timeout: float = 3.0) -> dict:
     parsed = urlparse(url)
     host = parsed.hostname or ""
     result = {"hostname": host, "a_records": [], "aaaa_records": [], "mx_records": None, "ns_records": None, "tls": None, "availability": "available"}
+    # Demo fixtures are intentionally offline. Never invoke DNS/TLS lookups for the
+    # local presentation domain so automated tests and demos remain deterministic.
+    if host == "m-phish.local":
+        result.update({
+            "a_records": ["198.51.100.10"],
+            "aaaa_records": [],
+            "tls": {"available": False, "fixture": True},
+            "availability": "fixture",
+        })
+        return result
     try:
         addresses = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
         result["a_records"] = sorted({item[4][0] for item in addresses if ":" not in item[4][0]})

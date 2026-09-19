@@ -110,7 +110,12 @@ export type MLPrediction = {
   feature_version: string;
   calibration_method: string;
   feature_contributions: Record<string, number>;
+  local_attribution?: Record<string, number>;
+  attribution_method?: string;
   is_phishing: boolean;
+  training_data?: string;
+  production_ready?: boolean;
+  validation?: Record<string, number>;
 };
 
 export type TrustBeforeYouAct = {
@@ -163,6 +168,7 @@ export type Report = {
   download_safety?: DownloadSafetyAssessment;
   campaign_similarity?: CampaignSimilarity;
   ml_prediction?: MLPrediction;
+  ml_model_status?: { deployment_status: string; training_data: string; validation?: Record<string, number> };
   safe_route?: string | null;
   trust_before_you_act?: TrustBeforeYouAct;
 };
@@ -183,6 +189,7 @@ export type ResearchExperiment = {
   brier_score: number;
   inference_latency_ms: number;
   hypothesis_confirmed: string;
+  benchmark_provenance?: string;
 };
 
 export type ResearchSuite = {
@@ -190,6 +197,8 @@ export type ResearchSuite = {
   experiments: ResearchExperiment[];
   primary_model: string;
   benchmark_dataset_samples: number;
+  dataset_provenance?: string;
+  evaluation_scope?: string;
   evaluated_at: string;
 };
 
@@ -270,6 +279,5 @@ export async function getResearchExperiments(): Promise<ResearchSuite> {
 }
 
 export async function getDemoScenarios(): Promise<DemoScenario[]> {
-  const response = await request<{ success: boolean; data: DemoScenario[] }>("/api/v1/demo/scenarios");
-  return response.data;
+  return request<DemoScenario[]>("/api/v1/demo/scenarios");
 }

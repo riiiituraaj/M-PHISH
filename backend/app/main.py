@@ -6,7 +6,6 @@ from dataclasses import asdict
 import ipaddress
 import json
 import re
-import sqlite3
 import socket
 import os
 import httpx
@@ -25,6 +24,8 @@ import time
 
 from .core.config import settings
 from .core.logging import configure_logging
+from .core.database import init_db, db_connection
+from sqlalchemy import text
 from .services.context.engine import build_relationships
 from .services.risk.engine import assess
 from .services.webpage.analyzer import analyze_sync
@@ -118,7 +119,7 @@ class OptionalAPIKeyMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if (
             settings.api_key
-            and request.url.path.startswith("/api/v1")
+            and request.url.path.startswith("/api/")
             and request.headers.get("X-API-Key") != settings.api_key
         ):
             return JSONResponse(
@@ -137,111 +138,119 @@ app.add_middleware(InvestigationRateLimitMiddleware)
 app.add_middleware(OptionalAPIKeyMiddleware)
 
 INVESTIGATIONS: dict[str, dict] = {}
-DB_PATH = Path(os.getenv("SQLITE_DB_PATH", Path(__file__).resolve().parents[1] / "m_phish.db"))
 
-
-def db() -> sqlite3.Connection:
-    connection = sqlite3.connect(DB_PATH)
-    connection.execute(
-        "CREATE TABLE IF NOT EXISTS investigations ("
-        "id TEXT PRIMARY KEY, url TEXT NOT NULL, status TEXT, risk_score INTEGER, "
-        "classification TEXT, summary TEXT, report TEXT NOT NULL, created_at TEXT NOT NULL, "
-        "completed_at TEXT)"
-    )
-    connection.execute(
-        "CREATE TABLE IF NOT EXISTS investigation_jobs ("
-        "id TEXT PRIMARY KEY, url TEXT NOT NULL, status TEXT NOT NULL, context TEXT NOT NULL, "
-        "error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, completed_at TEXT)"
-    )
-    columns = {row[1] for row in connection.execute("PRAGMA table_info(investigations)").fetchall()}
-    if "summary" not in columns:
-        connection.execute("ALTER TABLE investigations ADD COLUMN summary TEXT")
-    if "report" not in columns:
-        connection.execute("ALTER TABLE investigations ADD COLUMN report TEXT")
-    if "completed_at" not in columns:
-        connection.execute("ALTER TABLE investigations ADD COLUMN completed_at TEXT")
-    connection.execute(
-        "CREATE TABLE IF NOT EXISTS evidence ("
-        "id TEXT PRIMARY KEY, investigation_id TEXT NOT NULL, category TEXT, title TEXT, "
-        "description TEXT, source TEXT, confidence REAL, severity TEXT, created_at TEXT)"
-    )
-    connection.execute(
-        "CREATE TABLE IF NOT EXISTS features ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT, investigation_id TEXT NOT NULL, "
-        "feature_name TEXT, feature_value TEXT, source TEXT)"
-    )
-    connection.execute(
-        "CREATE TABLE IF NOT EXISTS events ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT, investigation_id TEXT NOT NULL, "
-        "event_type TEXT, message TEXT, timestamp TEXT)"
-    )
-    connection.execute(
-        "CREATE TABLE IF NOT EXISTS user_profile ("
-        "id INTEGER PRIMARY KEY, knowledge_level TEXT DEFAULT 'standard', created_at TEXT, updated_at TEXT)"
-    )
-    connection.commit()
-    return connection
+# Initialize database on startup
+init_db()
 
 
 def save_report(report: dict) -> None:
-    connection = db()
-    connection.execute(
-        "INSERT OR REPLACE INTO investigations (id, url, status, risk_score, classification, summary, report, created_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (
-            report["id"],
-            report["url"],
-            report["status"],
-            report["risk_score"],
-            report["classification"],
-            report["summary"],
-            json.dumps(report),
-            report["created_at"],
-            report.get("completed_at"),
-        ),
-    )
-    connection.executemany(
-        "INSERT OR REPLACE INTO evidence VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        [
-            (
-                item["id"],
-                report["id"],
-                item["category"],
-                item["title"],
-                item["description"],
-                item["source"],
-                item["confidence"],
-                item["severity"],
-                item["created_at"],
+    with db_connection() as conn:
+        is_pg = hasattr(conn, 'execute') and not hasattr(conn, 'cursor')
+        if is_pg:
+            conn.execute(
+                text("INSERT OR REPLACE INTO investigations (id, url, status, risk_score, classification, summary, report, created_at, completed_at) VALUES (:id, :url, :status, :risk_score, :classification, :summary, :report, :created_at, :completed_at)"),
+                {
+                    "id": report["id"],
+                    "url": report["url"],
+                    "status": report["status"],
+                    "risk_score": report["risk_score"],
+                    "classification": report["classification"],
+                    "summary": report["summary"],
+                    "report": json.dumps(report),
+                    "created_at": report["created_at"],
+                    "completed_at": report.get("completed_at"),
+                },
             )
-            for item in report["evidence"]
-        ],
-    )
-    connection.executemany(
-        "INSERT INTO features (investigation_id, feature_name, feature_value, source) VALUES (?, ?, ?, ?)",
-        [
-            (report["id"], name, json.dumps(value), "url_analyzer")
-            for name, value in report.get("features", {}).items()
-        ],
-    )
-    connection.executemany(
-        "INSERT INTO events (investigation_id, event_type, message, timestamp) VALUES (?, ?, ?, ?)",
-        [
-            (report["id"], event["event_type"], event["message"], event["timestamp"])
-            for event in report.get("events", [])
-        ],
-    )
-    connection.commit()
-    connection.close()
+            conn.execute(text("DELETE FROM evidence WHERE investigation_id = :id"), {"id": report["id"]})
+            conn.execute(text("DELETE FROM features WHERE investigation_id = :id"), {"id": report["id"]})
+            conn.execute(text("DELETE FROM events WHERE investigation_id = :id"), {"id": report["id"]})
+            for item in report["evidence"]:
+                conn.execute(
+                    text("INSERT OR REPLACE INTO evidence VALUES (:id, :investigation_id, :category, :title, :description, :source, :confidence, :severity, :created_at)"),
+                    {
+                        "id": item["id"],
+                        "investigation_id": report["id"],
+                        "category": item["category"],
+                        "title": item["title"],
+                        "description": item["description"],
+                        "source": item["source"],
+                        "confidence": item["confidence"],
+                        "severity": item["severity"],
+                        "created_at": item["created_at"],
+                    },
+                )
+            for name, value in report.get("features", {}).items():
+                conn.execute(
+                    text("INSERT INTO features (investigation_id, feature_name, feature_value, source) VALUES (:id, :name, :value, 'url_analyzer')"),
+                    {"id": report["id"], "name": name, "value": json.dumps(value)},
+                )
+            for event in report.get("events", []):
+                conn.execute(
+                    text("INSERT INTO events (investigation_id, event_type, message, timestamp) VALUES (:id, :type, :message, :timestamp)"),
+                    {"id": report["id"], "type": event["event_type"], "message": event["message"], "timestamp": event["timestamp"]},
+                )
+            conn.commit()
+        else:
+            conn.execute(
+                "INSERT OR REPLACE INTO investigations (id, url, status, risk_score, classification, summary, report, created_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    report["id"],
+                    report["url"],
+                    report["status"],
+                    report["risk_score"],
+                    report["classification"],
+                    report["summary"],
+                    json.dumps(report),
+                    report["created_at"],
+                    report.get("completed_at"),
+                ),
+            )
+            conn.execute("DELETE FROM evidence WHERE investigation_id = ?", (report["id"],))
+            conn.execute("DELETE FROM features WHERE investigation_id = ?", (report["id"],))
+            conn.execute("DELETE FROM events WHERE investigation_id = ?", (report["id"],))
+            conn.executemany(
+                "INSERT OR REPLACE INTO evidence VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (
+                        item["id"],
+                        report["id"],
+                        item["category"],
+                        item["title"],
+                        item["description"],
+                        item["source"],
+                        item["confidence"],
+                        item["severity"],
+                        item["created_at"],
+                    )
+                    for item in report["evidence"]
+                ],
+            )
+            conn.executemany(
+                "INSERT INTO features (investigation_id, feature_name, feature_value, source) VALUES (?, ?, ?, ?)",
+                [
+                    (report["id"], name, json.dumps(value), "url_analyzer")
+                    for name, value in report.get("features", {}).items()
+                ],
+            )
+            conn.executemany(
+                "INSERT INTO events (investigation_id, event_type, message, timestamp) VALUES (?, ?, ?, ?)",
+                [
+                    (report["id"], event["event_type"], event["message"], event["timestamp"])
+                    for event in report.get("events", [])
+                ],
+            )
+            conn.commit()
 
 
 def load_report(investigation_id: str) -> dict | None:
     if investigation_id in INVESTIGATIONS:
         return INVESTIGATIONS[investigation_id]
-    connection = db()
-    row = connection.execute(
-        "SELECT report FROM investigations WHERE id = ?", (investigation_id,)
-    ).fetchone()
-    connection.close()
+    with db_connection() as conn:
+        is_pg = hasattr(conn, 'execute') and not hasattr(conn, 'cursor')
+        if is_pg:
+            row = conn.execute(text("SELECT report FROM investigations WHERE id = :id"), {"id": investigation_id}).fetchone()
+        else:
+            row = conn.execute("SELECT report FROM investigations WHERE id = ?", (investigation_id,)).fetchone()
     if not row:
         return None
     report = json.loads(row[0])
@@ -249,32 +258,58 @@ def load_report(investigation_id: str) -> dict | None:
     return report
 
 
+def load_latest_report_for_url(url: str) -> dict | None:
+    with db_connection() as conn:
+        is_pg = hasattr(conn, 'execute') and not hasattr(conn, 'cursor')
+        if is_pg:
+            row = conn.execute(text("SELECT report FROM investigations WHERE url = :url ORDER BY created_at DESC LIMIT 1"), {"url": url}).fetchone()
+        else:
+            row = conn.execute("SELECT report FROM investigations WHERE url = ? ORDER BY created_at DESC LIMIT 1", (url,)).fetchone()
+    return json.loads(row[0]) if row else None
+
+
 def save_job(job: dict) -> None:
-    connection = db()
-    connection.execute(
-        "INSERT OR REPLACE INTO investigation_jobs (id, url, status, context, error, created_at, updated_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (
-            job["id"],
-            job["url"],
-            job["status"],
-            json.dumps(job.get("context", {})),
-            job.get("error"),
-            job["created_at"],
-            job.get("updated_at", job["created_at"]),
-            job.get("completed_at"),
-        ),
-    )
-    connection.commit()
-    connection.close()
+    with db_connection() as conn:
+        is_pg = hasattr(conn, 'execute') and not hasattr(conn, 'cursor')
+        if is_pg:
+            conn.execute(
+                text("INSERT OR REPLACE INTO investigation_jobs (id, url, status, context, error, created_at, updated_at, completed_at) VALUES (:id, :url, :status, :context, :error, :created_at, :updated_at, :completed_at)"),
+                {
+                    "id": job["id"],
+                    "url": job["url"],
+                    "status": job["status"],
+                    "context": json.dumps(job.get("context", {})),
+                    "error": job.get("error"),
+                    "created_at": job["created_at"],
+                    "updated_at": job.get("updated_at", job["created_at"]),
+                    "completed_at": job.get("completed_at"),
+                },
+            )
+            conn.commit()
+        else:
+            conn.execute(
+                "INSERT OR REPLACE INTO investigation_jobs (id, url, status, context, error, created_at, updated_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    job["id"],
+                    job["url"],
+                    job["status"],
+                    json.dumps(job.get("context", {})),
+                    job.get("error"),
+                    job["created_at"],
+                    job.get("updated_at", job["created_at"]),
+                    job.get("completed_at"),
+                ),
+            )
+            conn.commit()
 
 
 def load_job(investigation_id: str) -> dict | None:
-    connection = db()
-    row = connection.execute(
-        "SELECT id, url, status, context, error, created_at, updated_at, completed_at FROM investigation_jobs WHERE id = ?",
-        (investigation_id,),
-    ).fetchone()
-    connection.close()
+    with db_connection() as conn:
+        is_pg = hasattr(conn, 'execute') and not hasattr(conn, 'cursor')
+        if is_pg:
+            row = conn.execute(text("SELECT id, url, status, context, error, created_at, updated_at, completed_at FROM investigation_jobs WHERE id = :id"), {"id": investigation_id}).fetchone()
+        else:
+            row = conn.execute("SELECT id, url, status, context, error, created_at, updated_at, completed_at FROM investigation_jobs WHERE id = ?", (investigation_id,)).fetchone()
     if not row:
         return None
     job = {
@@ -294,18 +329,18 @@ def load_job(investigation_id: str) -> dict | None:
 
 class InvestigationRequest(BaseModel):
     url: HttpUrl
-    context: dict = {}
+    context: dict = Field(default_factory=dict)
 
 
 class QuickCheckRequest(BaseModel):
     url: HttpUrl
-    context: dict = {}
+    context: dict = Field(default_factory=dict)
 
 
 class DynamicTrustRequest(BaseModel):
     url: HttpUrl
     action_type: str = "password_focused"  # form_focused, password_focused, card_focused, download_attempt
-    action_details: dict = {}
+    action_details: dict = Field(default_factory=dict)
 
 
 def now() -> str:
@@ -346,7 +381,7 @@ def ai_explanation(
             "what_happened": what_happened or fallback_summary,
             "why_it_matters": why_it_matters or "Understanding who receives your data protects against credential theft.",
             "what_to_do": what_to_do or fallback_recommendation,
-            "uncertainty": "This digital trust assessment is derived from deterministic signals and calibrated statistical evidence.",
+            "uncertainty": "This digital trust assessment combines deterministic signals with a calibrated model trained on the configured development benchmark. It is not a guarantee of intent or safety.",
         }
     supplied = [
         {
@@ -406,7 +441,7 @@ def ai_explanation(
             "what_happened": what_happened or fallback_summary,
             "why_it_matters": why_it_matters or "Understanding who receives your data protects against credential theft.",
             "what_to_do": what_to_do or fallback_recommendation,
-            "uncertainty": "This digital trust assessment is derived from deterministic signals and calibrated statistical evidence.",
+            "uncertainty": "This digital trust assessment combines deterministic signals with a calibrated model trained on the configured development benchmark. It is not a guarantee of intent or safety.",
         }
 
 
@@ -414,7 +449,11 @@ def validate_target(url: str) -> None:
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise HTTPException(400, "Only http and https URLs are supported.")
-    host = parsed.hostname.lower()
+    if len(url) > 2048:
+        raise HTTPException(400, "The target URL is too long.")
+    if parsed.username or parsed.password:
+        raise HTTPException(400, "URLs containing embedded credentials are not supported.")
+    host = parsed.hostname.lower().rstrip(".")
     # Allow m-phish.local for safe, sandboxed local fixtures
     if host == "m-phish.local":
         return
@@ -422,14 +461,14 @@ def validate_target(url: str) -> None:
         raise HTTPException(400, "Local network targets are not allowed.")
     try:
         address = ipaddress.ip_address(host)
-        if address.is_private or address.is_loopback or address.is_link_local or address.is_reserved:
+        if address.is_private or address.is_loopback or address.is_link_local or address.is_reserved or address.is_multicast or address.is_unspecified:
             raise HTTPException(400, "Private and local network targets are not allowed.")
     except ValueError:
         try:
             resolved = socket.getaddrinfo(host, None)
             for item in resolved:
                 address = ipaddress.ip_address(item[4][0])
-                if address.is_private or address.is_loopback or address.is_link_local or address.is_reserved:
+                if address.is_private or address.is_loopback or address.is_link_local or address.is_reserved or address.is_multicast or address.is_unspecified:
                     raise HTTPException(400, "The target resolves to a private network address.")
         except socket.gaierror:
             pass
@@ -594,13 +633,18 @@ def build_report(url: str, investigation_id: str | None = None, context: dict | 
     # 4. Deceptive Claim Analysis
     claim_res = analyze_deceptive_claims(url, page, raw_html)
 
-    # 5. ML Model Inference (Calibrated XGBoost)
+    # 5. ML Model Inference
+    # Feed model-derived context too, so brand/organization consistency is not dependent on
+    # whether a browser client happened to provide those flags.
+    enriched_context = dict(context or {})
+    enriched_context.setdefault("brand_name_mismatch", identity_res.is_impersonation_suspected)
+    enriched_context.setdefault("claimed_org_unverified", identity_res.identity_consistency in {"LOW", "UNKNOWN"})
     ml_model = get_threat_model()
     ml_pred = ml_model.predict_multimodal(
         features,
         domain_analysis=domain,
         page_analysis=page,
-        context=context,
+        context=enriched_context,
     )
 
     # 6. Website Authenticity
@@ -802,6 +846,7 @@ def build_report(url: str, investigation_id: str | None = None, context: dict | 
         "events": events,
         "context_graph": build_relationships(urlparse(url).hostname or "", page, context),
         "context": context or {},
+        "model_context": enriched_context,
         "created_at": created,
         "completed_at": created,
 
@@ -815,6 +860,11 @@ def build_report(url: str, investigation_id: str | None = None, context: dict | 
         "download_safety": asdict(download_res),
         "campaign_similarity": asdict(campaign_res),
         "ml_prediction": asdict(ml_pred),
+        "ml_model_status": {
+            "deployment_status": "production-approved" if ml_pred.production_ready else ("externally-benchmarked-unapproved" if ml_pred.training_data.startswith("external-csv:") else "development-only"),
+            "training_data": ml_pred.training_data,
+            "validation": ml_pred.validation,
+        },
         "safe_route": identity_res.safe_route,
         "trust_before_you_act": {
             "requires_intervention": trust_profile.trust_state in ("HIGH_RISK", "STOP"),
@@ -841,8 +891,7 @@ def versioned_health():
 # Core Investigation Endpoints
 @app.post("/api/investigations")
 def create_investigation(payload: InvestigationRequest):
-    report = build_report(str(payload.url))
-    report["context"] = payload.context
+    report = build_report(str(payload.url), context=payload.context)
     INVESTIGATIONS[report["id"]] = report
     save_report(report)
     return report
@@ -856,9 +905,12 @@ def create_quick_check(payload: QuickCheckRequest):
 
 @app.get("/api/investigations")
 def list_investigations():
-    connection = db()
-    rows = connection.execute("SELECT report FROM investigations ORDER BY created_at DESC").fetchall()
-    connection.close()
+    with db_connection() as conn:
+        is_pg = hasattr(conn, 'execute') and not hasattr(conn, 'cursor')
+        if is_pg:
+            rows = conn.execute(text("SELECT report FROM investigations ORDER BY created_at DESC")).fetchall()
+        else:
+            rows = conn.execute("SELECT report FROM investigations ORDER BY created_at DESC").fetchall()
     return [json.loads(row[0]) for row in rows]
 
 
@@ -993,9 +1045,11 @@ def versioned_get_report(investigation_id: str):
 @app.post("/api/v1/dynamic-trust/evaluate")
 def evaluate_dynamic_trust(payload: DynamicTrustRequest):
     validate_target(str(payload.url))
-    # Quick evaluate current report or generate on the fly
+    # Reuse the most recent completed report for the URL. Interaction checks can fire
+    # repeatedly while a user moves through a form; rebuilding the crawler/ML stack for
+    # every focus event creates avoidable latency and load.
     url_str = str(payload.url)
-    report = build_report(url_str)
+    report = load_latest_report_for_url(url_str) or build_report(url_str)
     trust_prof_dict = report["digital_trust_profile"]
 
     from .services.trust.engine import DigitalTrustProfile
@@ -1042,7 +1096,9 @@ def get_multimodal_experiments(force_rerun: bool = False):
             "research_question": "Can a multimodal digital trust assessment approach provide more useful and interpretable protection against modern web-based deception than conventional URL-only phishing detection?",
             "experiments": experiments,
             "primary_model": "Calibrated XGBoost (Platt Scaling)",
-            "benchmark_dataset_samples": 2000,
+            "benchmark_dataset_samples": 1200,
+            "dataset_provenance": "synthetic-development-benchmark; not a substitute for an independently sourced phishing corpus",
+            "evaluation_scope": "development / reproducibility benchmark",
             "evaluated_at": now(),
         },
         "request_id": str(uuid4()),

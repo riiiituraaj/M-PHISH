@@ -1,11 +1,11 @@
 (() => {
   // src/background.ts
-  var API_ENDPOINTS = ["https://m-phish.onrender.com"];
+  var DEFAULT_API_ENDPOINT = "https://m-phish.onrender.com";
   var TTL = 5 * 60 * 1e3;
   var supported = (url) => !!url && /^https?:\/\//i.test(url);
   var ignoredHost = (url) => {
     try {
-      return ["m-phish.vercel.app", "m-phish.onrender.com", "localhost"].includes(new URL(url).hostname);
+      return ["m-phish.vercel.app", "m-phish.onrender.com", "localhost", "127.0.0.1"].includes(new URL(url).hostname);
     } catch {
       return true;
     }
@@ -22,18 +22,16 @@
     return item && Date.now() - item.savedAt < TTL ? item.value : void 0;
   }
   async function request(path, options) {
-    let lastError = null;
-    for (const base of API_ENDPOINTS) {
-      try {
-        const response = await fetch(`${base}${path}`, options);
-        if (response.ok) {
-          return (await response.json()).data;
-        }
-      } catch (e) {
-        lastError = e instanceof Error ? e : new Error(String(e));
-      }
+    const settings = await chrome.storage.local.get(["apiEndpoint", "apiKey"]);
+    const base = typeof settings.apiEndpoint === "string" && settings.apiEndpoint.trim() ? settings.apiEndpoint.trim().replace(/\/+$/, "") : DEFAULT_API_ENDPOINT;
+    const headers = new Headers(options?.headers || {});
+    if (typeof settings.apiKey === "string" && settings.apiKey.trim()) headers.set("X-API-Key", settings.apiKey.trim());
+    const response = await fetch(`${base}${path}`, { ...options, headers });
+    const envelope = await response.json().catch(() => null);
+    if (!response.ok || !envelope?.success) {
+      throw new Error(envelope?.error || `API request failed (${response.status})`);
     }
-    throw lastError || new Error(`API request failed for ${path}`);
+    return envelope.data;
   }
   async function investigate(tabId, url) {
     const job = await request("/api/v1/investigations", {

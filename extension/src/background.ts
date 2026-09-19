@@ -1,3 +1,4 @@
+/// <reference path="./chrome.d.ts" />
 type QuickCheck = {
   tier: "LOW" | "MEDIUM" | "HIGH";
   deep_required: boolean;
@@ -14,13 +15,12 @@ type TabContext = {
   timestamp: string;
 };
 
-// Auto-fallback between local backend and production endpoint
-const API_ENDPOINTS = ["https://m-phish.onrender.com"];
+const DEFAULT_API_ENDPOINT = "https://m-phish.onrender.com";
 const TTL = 5 * 60 * 1000;
 const supported = (url?: string) => !!url && /^https?:\/\//i.test(url);
 const ignoredHost = (url: string) => {
   try {
-    return ["m-phish.vercel.app", "m-phish.onrender.com", "localhost"].includes(new URL(url).hostname);
+    return ["m-phish.vercel.app", "m-phish.onrender.com", "localhost", "127.0.0.1"].includes(new URL(url).hostname);
   } catch {
     return true;
   }
@@ -40,19 +40,20 @@ async function cached(url: string): Promise<QuickCheck | undefined> {
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  let lastError: Error | null = null;
-  for (const base of API_ENDPOINTS) {
-    try {
-      const response = await fetch(`${base}${path}`, options);
-      if (response.ok) {
-        return ((await response.json()) as Envelope<T>).data;
-      }
-    } catch (e) {
-      lastError = e instanceof Error ? e : new Error(String(e));
-    }
+  const settings = await chrome.storage.local.get(["apiEndpoint", "apiKey"]);
+  const base = typeof settings.apiEndpoint === "string" && settings.apiEndpoint.trim()
+    ? settings.apiEndpoint.trim().replace(/\/+$/, "")
+    : DEFAULT_API_ENDPOINT;
+  const headers = new Headers(options?.headers || {});
+  if (typeof settings.apiKey === "string" && settings.apiKey.trim()) headers.set("X-API-Key", settings.apiKey.trim());
+  const response = await fetch(`${base}${path}`, { ...options, headers });
+  const envelope = (await response.json().catch(() => null)) as Envelope<T> | null;
+  if (!response.ok || !envelope?.success) {
+    throw new Error((envelope as any)?.error || `API request failed (${response.status})`);
   }
-  throw lastError || new Error(`API request failed for ${path}`);
+  return envelope.data;
 }
+
 
 async function investigate(
   tabId: number,

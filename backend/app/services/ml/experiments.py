@@ -15,7 +15,7 @@ from sklearn.metrics import (
 from sklearn.calibration import CalibratedClassifierCV
 import xgboost as xgb
 
-from .dataset import generate_synthetic_dataset, FEATURE_GROUPS
+from .dataset import generate_synthetic_dataset, load_external_dataset, FEATURE_GROUPS
 
 
 @dataclass
@@ -35,6 +35,7 @@ class ExperimentResult:
     brier_score: float
     inference_latency_ms: float
     hypothesis_confirmed: str
+    benchmark_provenance: str = "synthetic-development-benchmark"
 
 
 _cached_experiments: list[dict] | None = None
@@ -53,7 +54,13 @@ def run_multimodal_experiments(random_state: int = 42, force_rerun: bool = False
     if _cached_experiments is not None and not force_rerun:
         return _cached_experiments
 
-    X_all, y_all = generate_synthetic_dataset(n_samples=2000, random_state=random_state)
+    import os
+    dataset_path = os.getenv("MPHISH_DATASET_PATH", "").strip() or None
+    if dataset_path:
+        X_all, y_all, provenance = load_external_dataset(dataset_path)
+    else:
+        X_all, y_all = generate_synthetic_dataset(n_samples=1200, random_state=random_state)
+        provenance = "synthetic-development-benchmark"
     X_train, X_test, y_train, y_test = train_test_split(
         X_all, y_all, test_size=0.3, random_state=random_state, stratify=y_all
     )
@@ -105,13 +112,17 @@ def run_multimodal_experiments(random_state: int = 42, force_rerun: bool = False
 
         # Train calibrated XGBoost
         base_xgb = xgb.XGBClassifier(
-            n_estimators=45,
-            max_depth=4,
+            n_estimators=24,
+            max_depth=3,
             learning_rate=0.08,
+            subsample=0.9,
+            colsample_bytree=0.9,
             eval_metric="logloss",
+            tree_method="hist",
             random_state=random_state,
+            n_jobs=1,
         )
-        model = CalibratedClassifierCV(estimator=base_xgb, method="sigmoid", cv=3)
+        model = CalibratedClassifierCV(estimator=base_xgb, method="sigmoid", cv=2)
         model.fit(X_tr, y_train)
 
         # Benchmark latency over 100 single-item predictions
@@ -153,6 +164,7 @@ def run_multimodal_experiments(random_state: int = 42, force_rerun: bool = False
             brier_score=round(brier, 4),
             inference_latency_ms=latency_ms,
             hypothesis_confirmed=exp["hypothesis"],
+            benchmark_provenance=provenance,
         )
         results.append(asdict(res))
 

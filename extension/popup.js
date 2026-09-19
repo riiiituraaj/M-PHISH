@@ -1,12 +1,12 @@
 (() => {
   // src/popup.ts
-  var API_ENDPOINTS = ["https://m-phish.onrender.com"];
+  var DEFAULT_API_ENDPOINT = "https://m-phish.onrender.com";
   var DEFAULT_DASHBOARD = "https://m-phish.vercel.app";
   var LOCAL_DASHBOARD = "http://localhost:3000";
   var root = document.getElementById("app");
   var activeBase = null;
   var dashboardOverride = null;
-  var escape = (value) => (value || "").replace(/[&<>"']/g, (c) => {
+  var htmlEscape = (value) => (value || "").replace(/[&<>"']/g, (c) => {
     const map = { "&": "&", "<": "<", ">": ">", '"': '"', "'": "'" };
     return map[c];
   });
@@ -47,7 +47,7 @@
     root.innerHTML = `<div class="popup">${header()}<div class="content">${body}</div></div>`;
   }
   function row(label, value, options) {
-    return `<div class="row"><span class="row-label">${escape(label)}</span><span class="row-value${options?.mono ? " mono" : ""}">${escape(value)}</span></div>`;
+    return `<div class="row"><span class="row-label">${htmlEscape(label)}</span><span class="row-value${options?.mono ? " mono" : ""}">${htmlEscape(value)}</span></div>`;
   }
   function scoreBlock(score, tone, pillLabel, caption) {
     const bounded = Math.max(0, Math.min(100, score));
@@ -55,20 +55,20 @@
     <section class="score">
       <div class="score-head">
         <span class="label">Digital trust score</span>
-        <span class="pill ${tone}">${escape(pillLabel)}</span>
+        <span class="pill ${tone}">${htmlEscape(pillLabel)}</span>
       </div>
       <div class="score-value"><strong>${bounded}</strong><span>/100</span></div>
       <div class="meter" role="img" aria-label="Trust score ${bounded} out of 100">
         <span class="meter-fill ${tone}" style="width:${Math.max(3, bounded)}%"></span>
       </div>
-      <p class="score-caption">${escape(caption)}</p>
+      <p class="score-caption">${htmlEscape(caption)}</p>
     </section>`;
   }
   function statusBanner(tone) {
     return `
     <div class="banner ${tone}">
       <span class="banner-dot" aria-hidden="true"></span>
-      <b>${escape(TONE_TITLE[tone])}</b>
+      <b>${htmlEscape(TONE_TITLE[tone])}</b>
     </div>`;
   }
   function footer(protectionEnabled = true) {
@@ -102,17 +102,22 @@
     chrome.storage.local.set({ protectionEnabled: enabled }).then(init);
   }
   async function request(path, options) {
+    const settings = await chrome.storage.local.get(["apiEndpoint", "apiKey"]);
+    const base = typeof settings.apiEndpoint === "string" && settings.apiEndpoint.trim() ? settings.apiEndpoint.trim().replace(/\/+$/, "") : DEFAULT_API_ENDPOINT;
+    const headers = new Headers(options?.headers || {});
+    if (typeof settings.apiKey === "string" && settings.apiKey.trim()) headers.set("X-API-Key", settings.apiKey.trim());
     let lastError = null;
-    for (const base of API_ENDPOINTS) {
-      try {
-        const response = await fetch(`${base}${path}`, options);
-        if (response.ok) {
-          activeBase = base;
-          return (await response.json()).data;
-        }
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
+    try {
+      const response = await fetch(`${base}${path}`, { ...options, headers });
+      const envelope = await response.json().catch(() => null);
+      if (response.ok && envelope?.success) {
+        activeBase = base;
+        return envelope.data;
       }
+      const message = envelope?.request_id ? `${envelope.error || `API request failed (${response.status})`} [${envelope.request_id}]` : envelope?.error || `API request failed (${response.status})`;
+      throw new Error(message);
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
     }
     throw lastError || new Error("The analysis service is unreachable.");
   }
@@ -128,7 +133,7 @@
     <div class="loading">
       <span class="spinner" aria-hidden="true"></span>
       <div>
-        <p class="loading-title">Analysing ${escape(host)}</p>
+        <p class="loading-title">Analysing ${htmlEscape(host)}</p>
         <p class="loading-note">Checking identity, page signals and behaviour.</p>
       </div>
     </div>
@@ -177,7 +182,7 @@
     <section class="state">
       <span class="state-icon">${ICON_ALERT}</span>
       <h1>No result yet</h1>
-      <p class="lede">${escape(message)}</p>
+      <p class="lede">${htmlEscape(message)}</p>
       <p class="lede subtle">Confirm the M-PHISH X backend is running, then try again.</p>
     </section>
     <div class="actions">
@@ -193,12 +198,12 @@
     const host = hostOf(url);
     const trustScore = Math.max(0, Math.min(100, 100 - quick.score));
     const tone = quick.tier === "LOW" ? "trusted" : quick.tier === "MEDIUM" ? "caution" : "high-risk";
-    const signals = quick.top_reasons.length ? quick.top_reasons.map((reason) => `<div class="evidence"><b>${escape(reason)}</b><span>URL signal</span></div>`).join("") : `<div class="evidence"><b>No suspicious URL signals</b><span>URL analysis</span></div>`;
+    const signals = quick.top_reasons.length ? quick.top_reasons.map((reason) => `<div class="evidence"><b>${htmlEscape(reason)}</b><span>URL signal</span></div>`).join("") : `<div class="evidence"><b>No suspicious URL signals</b><span>URL analysis</span></div>`;
     shell(`
     ${statusBanner(tone)}
     <div class="target">
-      <p class="target-host">${escape(host)}</p>
-      <p class="target-url">${escape(url)}</p>
+      <p class="target-host">${htmlEscape(host)}</p>
+      <p class="target-url">${htmlEscape(url)}</p>
     </div>
 
     ${scoreBlock(
@@ -217,7 +222,7 @@
     <div class="actions">
       <button class="button primary" id="check" type="button">Run full investigation</button>
       <button class="button ghost" id="open-dashboard-ready" type="button">
-        ${ICON_EXTERNAL} View full report on dashboard
+        ${ICON_EXTERNAL} Open dashboard overview
       </button>
       <button class="button ghost" id="view-signals" type="button">View details</button>
     </div>
@@ -231,7 +236,7 @@
       if (current?.id && current.url && /^https?:/i.test(current.url))
         await checkCurrent(current.id, current.url, true);
     };
-    document.getElementById("open-dashboard-ready").onclick = () => openDashboard(`/investigations/${encodeURIComponent(url)}`);
+    document.getElementById("open-dashboard-ready").onclick = () => openDashboard("/");
     document.getElementById("view-signals").onclick = () => {
       const toggle = document.getElementById("quick-signals");
       const panel = document.getElementById("quick-signals-panel");
@@ -262,7 +267,7 @@
     const identityRows = identity ? `<section class="card">
          <div class="card-head">
            <span class="label">Who am I giving this to?</span>
-           <span class="pill ${identity.identity_consistency === "HIGH" ? "trusted" : tone}">${escape(
+           <span class="pill ${identity.identity_consistency === "HIGH" ? "trusted" : tone}">${htmlEscape(
       identity.identity_consistency
     )}</span>
          </div>
@@ -271,25 +276,25 @@
            ${row("Current host", identity.current_website || report.hostname, { mono: true })}
            ${row("Data destination", identity.credential_destination || "Not detected", { mono: true })}
          </div>
-         ${identity.explanation ? `<p class="card-note">${escape(identity.explanation)}</p>` : ""}
+         ${identity.explanation ? `<p class="card-note">${htmlEscape(identity.explanation)}</p>` : ""}
        </section>` : "";
     const safeRoute = report.safe_route || identity?.safe_route || null;
-    const safeRouteButton = safeRoute ? `<a class="button safe" href="${escape(safeRoute)}" target="_blank" rel="noopener noreferrer">
+    const safeRouteButton = safeRoute ? `<a class="button safe" href="${htmlEscape(safeRoute)}" target="_blank" rel="noopener noreferrer">
          ${ICON_SAFE} Open official site
        </a>` : "";
     const evidence = report.evidence.length ? report.evidence.slice(0, 6).map(
       (item) => `
           <div class="evidence">
-            <b>${escape(item.title)}</b>
-            <span>${escape(item.category)} \xB7 ${Math.round(item.confidence * 100)}% confidence</span>
-            <p>${escape(item.description)}</p>
+            <b>${htmlEscape(item.title)}</b>
+            <span>${htmlEscape(item.category)} \xB7 ${Math.round(item.confidence * 100)}% confidence</span>
+            <p>${htmlEscape(item.description)}</p>
           </div>`
     ).join("") : `<div class="evidence"><b>No anomalous evidence recorded</b><span>Engine output</span></div>`;
     shell(`
     ${statusBanner(tone)}
     <div class="target">
-      <p class="target-host">${escape(report.hostname)}</p>
-      <p class="target-url">${escape(report.url)}</p>
+      <p class="target-host">${htmlEscape(report.hostname)}</p>
+      <p class="target-url">${htmlEscape(report.url)}</p>
     </div>
 
     ${scoreBlock(
@@ -303,7 +308,7 @@
 
     <section class="card">
       <span class="label">What happened</span>
-      <p class="card-note">${escape(report.what_happened || report.summary)}</p>
+      <p class="card-note">${htmlEscape(report.what_happened || report.summary)}</p>
     </section>
 
     <div class="actions">
@@ -319,9 +324,9 @@
     ${disclosure(
       "report-details",
       `Evidence and next steps (${report.evidence.length})`,
-      `<div class="recommendation">${escape(report.what_to_do || report.recommendation)}</div>
+      `<div class="recommendation">${htmlEscape(report.what_to_do || report.recommendation)}</div>
        <div class="evidence-list">${evidence}</div>
-       <p class="target-url mono">${escape(report.id)}</p>`
+       <p class="target-url mono">${htmlEscape(report.id)}</p>`
     )}
 
     ${footer()}`);
@@ -372,7 +377,7 @@
   function disclosure(id, label, content) {
     return `
     <button class="disclosure-toggle" id="${id}" type="button" aria-expanded="false" aria-controls="${id}-panel">
-      <span>${escape(label)}</span>${ICON_CHEVRON}
+      <span>${htmlEscape(label)}</span>${ICON_CHEVRON}
     </button>
     <section class="disclosure" id="${id}-panel" hidden>${content}</section>`;
   }

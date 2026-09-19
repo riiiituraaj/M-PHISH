@@ -82,7 +82,7 @@
         (response) => {
           if (!response) return;
           if (response.requires_intervention && !isDismissedForSession) {
-            showTrustBeforeYouActBanner(response, input);
+            showTrustBeforeYouActBanner(response, { field_label: fieldLabel, form_action: formAction });
           }
         }
       );
@@ -104,7 +104,7 @@
           },
           (response) => {
             if (response?.requires_intervention && !isDismissedForSession) {
-              showTrustBeforeYouActBanner(response, target);
+              showTrustBeforeYouActBanner(response, { download_url: target.href });
             }
           }
         );

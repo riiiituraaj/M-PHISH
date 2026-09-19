@@ -1,3 +1,4 @@
+/// <reference path="./chrome.d.ts" />
 /**
  * M-PHISH X options page.
  *
@@ -11,6 +12,8 @@ type Preferences = {
   showLowRisk: boolean;
   explanationLevel: string;
   dashboardUrl: string;
+  apiEndpoint: string;
+  apiKey: string;
 };
 
 const defaults: Preferences = {
@@ -19,11 +22,13 @@ const defaults: Preferences = {
   showLowRisk: false,
   explanationLevel: "standard",
   dashboardUrl: "",
+  apiEndpoint: "https://m-phish.onrender.com",
+  apiKey: "",
 };
 
 const root = document.getElementById("options")!;
 
-const escape = (value: string) =>
+const htmlEscape = (value: string) =>
   (value || "").replace(/[&<>"']/g, (c) => {
     const map: Record<string, string> = { "&": "&", "<": "<", ">": ">", '"': '"', "'": "'" };
     return map[c];
@@ -41,7 +46,7 @@ const toggle = (
   hint: string,
 ) => `
   <label class="toggle-row">
-    <span class="toggle-copy"><b>${escape(title)}</b><small>${escape(hint)}</small></span>
+    <span class="toggle-copy"><b>${htmlEscape(title)}</b><small>${htmlEscape(hint)}</small></span>
     <span class="switch">
       <input id="${id}" type="checkbox" ${checked ? "checked" : ""} />
       <span class="switch-track"></span>
@@ -106,6 +111,24 @@ function render(value: Partial<Preferences>) {
 
       <section class="section">
         <div class="section-head">
+          <span class="label">Analysis service</span>
+          <h2>Backend connection</h2>
+          <p>Use the hosted API by default, or point the extension at a local/private deployment.</p>
+        </div>
+        <div class="field">
+          <label for="apiEndpoint">API address</label>
+          <input id="apiEndpoint" type="url" inputmode="url" spellcheck="false" value="${htmlEscape(prefs.apiEndpoint)}" />
+          <span class="field-hint">The extension sends analysis requests only to this configured origin.</span>
+        </div>
+        <div class="field">
+          <label for="apiKey">API key <span style="opacity:.65">(optional)</span></label>
+          <input id="apiKey" type="password" autocomplete="off" spellcheck="false" value="${htmlEscape(prefs.apiKey)}" />
+          <span class="field-hint">Only use a key intended for browser clients. Do not store privileged server credentials here.</span>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
           <span class="label">Dashboard</span>
           <h2>Report destination</h2>
           <p>The "View full report" button opens investigations in this dashboard.</p>
@@ -118,7 +141,7 @@ function render(value: Partial<Preferences>) {
             inputmode="url"
             spellcheck="false"
             placeholder="https://m-phish.vercel.app"
-            value="${escape(prefs.dashboardUrl)}"
+            value="${htmlEscape(prefs.dashboardUrl)}"
           />
           <span class="field-hint">Leave empty to detect automatically: a local backend links to localhost:3000, otherwise the hosted dashboard is used.</span>
         </div>
@@ -146,6 +169,8 @@ function render(value: Partial<Preferences>) {
     showLowRisk: read("lowrisk"),
     explanationLevel: readValue("level"),
     dashboardUrl: readValue("dashboard").trim(),
+    apiEndpoint: readValue("apiEndpoint").trim(),
+    apiKey: readValue("apiKey"),
   });
 
   document.getElementById("save")!.onclick = async () => {

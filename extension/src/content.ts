@@ -1,3 +1,4 @@
+/// <reference path="./chrome.d.ts" />
 // M-PHISH X Content Script: "Trust Before You Act" & Dynamic Interaction Sentinel
 
 let isDismissedForSession = false;
@@ -97,7 +98,7 @@ function attachInteractionListeners() {
       (response) => {
         if (!response) return;
         if (response.requires_intervention && !isDismissedForSession) {
-          showTrustBeforeYouActBanner(response, input);
+          showTrustBeforeYouActBanner(response, { field_label: fieldLabel, form_action: formAction });
         }
       }
     );
@@ -121,7 +122,7 @@ function attachInteractionListeners() {
         },
         (response) => {
           if (response?.requires_intervention && !isDismissedForSession) {
-            showTrustBeforeYouActBanner(response, target);
+            showTrustBeforeYouActBanner(response, { download_url: target.href });
           }
         }
       );

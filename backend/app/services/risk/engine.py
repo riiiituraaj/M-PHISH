@@ -29,8 +29,8 @@ def assess(
 ) -> RiskAssessment:
     """
     Evidence Fusion Engine:
-    Combines deterministic category evidence weights with calibrated ML probability
-    while maintaining 100% explainable attribution.
+    Combines deterministic category evidence weights with calibrated ML probability.
+    The category breakdown is an evidence attribution, not a claim of model-specific feature importance.
     """
     category_totals = {category: 0.0 for category in WEIGHTS}
     attribution = {}

@@ -12,11 +12,11 @@ def _safe_host(value: str) -> bool:
         return False
     try:
         address = ipaddress.ip_address(host)
-        return not (address.is_private or address.is_loopback or address.is_link_local or address.is_reserved)
+        return not (address.is_private or address.is_loopback or address.is_link_local or address.is_reserved or address.is_multicast or address.is_unspecified)
     except ValueError:
         try:
             addresses = socket.getaddrinfo(host, None)
-            return all(not ipaddress.ip_address(item[4][0]).is_private and not ipaddress.ip_address(item[4][0]).is_loopback and not ipaddress.ip_address(item[4][0]).is_link_local for item in addresses)
+            return all(not (ipaddress.ip_address(item[4][0]).is_private or ipaddress.ip_address(item[4][0]).is_loopback or ipaddress.ip_address(item[4][0]).is_link_local or ipaddress.ip_address(item[4][0]).is_reserved or ipaddress.ip_address(item[4][0]).is_multicast or ipaddress.ip_address(item[4][0]).is_unspecified) for item in addresses)
         except socket.gaierror:
             return False
 

@@ -1,17 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import {
-  Award,
-  BarChart3,
-  CheckCircle,
-  Database,
-  FlaskConical,
-  Gauge,
-  Layers,
-  ShieldCheck,
-  Sparkles,
-  TrendingUp,
-} from "lucide-react";
+import { BarChart3, FlaskConical, Gauge, ShieldCheck, Sparkles, TrendingUp } from "lucide-react";
 import { getResearchExperiments, ResearchSuite } from "../../lib/api";
 
 export default function ResearchPage() {
@@ -21,165 +10,122 @@ export default function ResearchPage() {
 
   useEffect(() => {
     getResearchExperiments()
-      .then((data) => {
-        setSuite(data);
-        setLoading(false);
-      })
-      .catch((err) => {
-        setError(err instanceof Error ? err.message : "Failed to load experiment data");
-        setLoading(false);
-      });
+      .then(setSuite)
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load experiment data"))
+      .finally(() => setLoading(false));
   }, []);
 
   return (
     <main className="research-page">
       <div className="section-head">
         <div>
-          <div className="eyebrow">
-            <FlaskConical size={14} /> Empirical Cybersecurity Research
-          </div>
+          <div className="eyebrow"><FlaskConical size={14} /> Empirical Cybersecurity Research</div>
           <h1>Multimodal Ablation Study</h1>
           <p className="subtle">
-            Experimental evaluation quantifying the additive predictive value of multimodal
-            evidence layers over conventional URL-only classifiers.
+            A reproducible engineering benchmark for measuring how additional web-safety evidence changes model behaviour.
           </p>
         </div>
       </div>
 
-      {/* Core Research Question Banner */}
       <section className="research-hypothesis-card">
-        <div className="hypothesis-icon">
-          <Sparkles size={22} />
-        </div>
+        <div className="hypothesis-icon"><Sparkles size={22} /></div>
         <div>
-          <span className="section-kicker">Primary Research Hypothesis</span>
+          <span className="section-kicker">Research question</span>
           <h2>
-            &ldquo;Can a multimodal digital trust assessment approach provide more useful and
-            interpretable protection against modern web deception than conventional URL-only
-            phishing detection?&rdquo;
+            Can multimodal digital-trust evidence provide more useful and interpretable protection than URL-only analysis?
           </h2>
           <p>
-            Evaluated on a balanced benchmark test suite (n = 2,000 samples) across URL, Domain,
-            Webpage, Behavioral, and Contextual feature groups using Calibrated XGBoost.
+            The bundled experiment evaluates five modality conditions on a balanced synthetic development benchmark
+            with an independent held-out test split.
           </p>
         </div>
       </section>
 
-      {loading && (
-        <div className="empty" style={{ padding: "40px" }}>
-          Running multimodal ablation benchmark across Experiments A to E...
-        </div>
-      )}
-
-      {error && (
-        <div className="empty" role="alert" style={{ color: "#ef4444" }}>
-          {error}
-        </div>
-      )}
+      {loading && <div className="empty" style={{ padding: "40px" }}>Running multimodal ablation benchmark across Experiments A to E...</div>}
+      {error && <div className="empty" role="alert" style={{ color: "#ef4444" }}>{error}</div>}
 
       {suite && (
         <>
-          {/* Main Experiments Comparison Table */}
+          <section className="surface" style={{ padding: 18, marginBottom: 14, border: "1px solid var(--line)" }}>
+            <div className="section-kicker">Evaluation provenance</div>
+            <p className="subtle" style={{ margin: "8px 0 0", lineHeight: 1.6 }}>
+              {suite.dataset_provenance || "Synthetic development benchmark."} Results are intended for regression testing,
+              ablation analysis, and reproducibility. They are not real-world phishing prevalence estimates.
+            </p>
+          </section>
+
           <section className="surface experiment-table-card">
             <div className="panel-heading">
               <div>
-                <span className="section-kicker">Benchmark Ablation Matrix</span>
-                <h2>Model Performance Across Modality Conditions</h2>
+                <span className="section-kicker">Benchmark ablation matrix</span>
+                <h2>Performance by evidence layer</h2>
               </div>
-              <span className="panel-count">5 Conditions</span>
+              <span className="panel-count">{suite.experiments.length} Conditions</span>
             </div>
 
             <div className="table-wrapper">
               <table className="research-table">
                 <thead>
                   <tr>
-                    <th>Experiment</th>
-                    <th>Modalities</th>
-                    <th>Features</th>
-                    <th>Accuracy</th>
-                    <th>Precision</th>
-                    <th>Recall</th>
-                    <th>F1 Score</th>
-                    <th>ROC-AUC</th>
-                    <th>FPR</th>
-                    <th>Brier Score</th>
-                    <th>Latency</th>
+                    <th>Experiment</th><th>Modalities</th><th>Features</th><th>Accuracy</th><th>Precision</th>
+                    <th>Recall</th><th>F1</th><th>ROC-AUC</th><th>FPR</th><th>Brier</th><th>Latency</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {suite.experiments.map((exp, index) => {
-                    const isWinner = index === suite.experiments.length - 1;
-                    return (
-                      <tr key={exp.experiment_id} className={isWinner ? "row-winner" : ""}>
-                        <td>
-                          <strong>{exp.name}</strong>
-                          {isWinner && <span className="winner-tag">Optimal</span>}
-                        </td>
-                        <td>
-                          <span className="modalities-pill">
-                            {exp.feature_groups.join(" + ")}
-                          </span>
-                        </td>
-                        <td>{exp.num_features}</td>
-                        <td>{(exp.accuracy * 100).toFixed(1)}%</td>
-                        <td>{(exp.precision * 100).toFixed(1)}%</td>
-                        <td>{(exp.recall * 100).toFixed(1)}%</td>
-                        <td>
-                          <b>{(exp.f1 * 100).toFixed(1)}%</b>
-                        </td>
-                        <td>{exp.roc_auc.toFixed(3)}</td>
-                        <td>{(exp.false_positive_rate * 100).toFixed(1)}%</td>
-                        <td>{exp.brier_score.toFixed(3)}</td>
-                        <td>{exp.inference_latency_ms} ms</td>
-                      </tr>
-                    );
-                  })}
+                  {suite.experiments.map((exp) => (
+                    <tr key={exp.experiment_id}>
+                      <td><strong>{exp.name}</strong></td>
+                      <td><span className="modalities-pill">{exp.feature_groups.join(" + ")}</span></td>
+                      <td>{exp.num_features}</td>
+                      <td>{(exp.accuracy * 100).toFixed(1)}%</td>
+                      <td>{(exp.precision * 100).toFixed(1)}%</td>
+                      <td>{(exp.recall * 100).toFixed(1)}%</td>
+                      <td><b>{(exp.f1 * 100).toFixed(1)}%</b></td>
+                      <td>{exp.roc_auc.toFixed(3)}</td>
+                      <td>{(exp.false_positive_rate * 100).toFixed(1)}%</td>
+                      <td>{exp.brier_score.toFixed(3)}</td>
+                      <td>{exp.inference_latency_ms} ms</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
           </section>
 
-          {/* Key Findings Grid */}
           <div className="research-findings-grid">
             <div className="surface finding-card">
-              <div className="finding-header">
-                <TrendingUp size={18} />
-                <h3>Recall Elevation via Webpage Inspection</h3>
-              </div>
+              <div className="finding-header"><TrendingUp size={18} /><h3>Incremental signal coverage</h3></div>
               <p>
-                Adding DOM inspection (forms, credential inputs) in <b>Experiment C</b> increases
-                detection recall significantly over URL-only baselines, eliminating blind spots
-                for legitimate cloud services hosting credential harvesting forms.
+                DOM and behavioural features expose signals unavailable to a URL-only classifier. Use the table to
+                compare Experiment C and D against Experiment A on the same held-out split.
               </p>
             </div>
-
             <div className="surface finding-card">
-              <div className="finding-header">
-                <ShieldCheck size={18} />
-                <h3>FPR Suppression via Domain & Identity</h3>
-              </div>
+              <div className="finding-header"><ShieldCheck size={18} /><h3>Cross-layer evidence</h3></div>
               <p>
-                Incorporating DNS A/AAAA records, TLS attributes, and brand alignment in{" "}
-                <b>Experiment B & E</b> prevents false positives on complex legitimate portals,
-                delivering a balanced, non-alarmist consumer experience.
+                Domain, identity, and contextual features allow the system to reason about where data is going and what
+                identity a page claims, not only what its URL looks like.
               </p>
             </div>
-
             <div className="surface finding-card">
-              <div className="finding-header">
-                <Gauge size={18} />
-                <h3>Superior Calibration & Brier Score</h3>
-              </div>
+              <div className="finding-header"><Gauge size={18} /><h3>Calibration diagnostic</h3></div>
               <p>
-                Platt scaling (sigmoid calibration) applied to XGBoost outputs yields a lower Brier
-                score across all conditions, ensuring that calculated probabilities accurately
-                reflect true empirical risk rather than arbitrary confidence heuristics.
+                Brier score and ROC-AUC are reported alongside classification metrics. The calibration result is valid
+                for this development benchmark and should be re-validated on independently sourced real-world data.
               </p>
             </div>
           </div>
+
+          <section className="surface" style={{ marginTop: 14, padding: 18 }}>
+            <div className="finding-header"><BarChart3 size={18} /><h3>How to use these results</h3></div>
+            <p className="subtle">
+              Treat the ablation suite as a regression guard: a code change should not silently degrade recall, false
+              positive rate, calibration, or latency. It is deliberately separate from any claim that the detector is
+              production-accurate against the live web.
+            </p>
+          </section>
         </>
       )}
     </main>
   );
 }
-
