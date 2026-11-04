@@ -1,4 +1,4 @@
-# M-PHISH X
+# M-PHISH 
 
 M-PHISH X is a contextual digital threat-intelligence prototype for helping people make safer decisions before trusting a website or digital interaction. It combines URL signals, optional page observations, behavioral evidence, and contextual relationships into a transparent risk assessment with human-readable guidance.
 
