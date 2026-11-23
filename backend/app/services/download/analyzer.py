@@ -1,6 +1,8 @@
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from urllib.parse import urlparse
-import re
+
+from ..observations import page_available
 
 
 @dataclass
@@ -11,28 +13,40 @@ class DownloadSafetyAssessment:
     is_executable_or_script: bool
     risk_level: str  # SAFE, ATTENTION, HIGH_RISK
     explanation: str
+    availability: str = "available"
+    content_scanned: bool = False
 
 
 RISKY_EXTENSIONS = {
-    ".exe", ".msi", ".bat", ".cmd", ".ps1", ".vbs", ".js", ".scr", ".pif",
-    ".iso", ".apk", ".dll", ".hta", ".wsf", ".cpl"
+    ".exe",
+    ".msi",
+    ".bat",
+    ".cmd",
+    ".ps1",
+    ".vbs",
+    ".js",
+    ".scr",
+    ".pif",
+    ".iso",
+    ".apk",
+    ".dll",
+    ".hta",
+    ".wsf",
+    ".cpl",
 }
 
-ARCHIVE_EXTENSIONS = {
-    ".zip", ".rar", ".7z", ".tar", ".gz"
-}
+ARCHIVE_EXTENSIONS = {".zip", ".rar", ".7z", ".tar", ".gz"}
 
 
 def analyze_download(
     url: str,
     page_data: dict,
     html_sample: str = "",
-    overall_trust: int = 100,
+    overall_trust: int | None = None,
 ) -> DownloadSafetyAssessment:
     """Evaluate download links detected on the page or direct URL download target."""
     parsed = urlparse(url)
     path = parsed.path.lower()
-    text = (html_sample or "").lower()
 
     # Find download links in sample HTML or URL path
     download_url = None
@@ -47,16 +61,33 @@ def analyze_download(
             file_ext = ext
             break
 
-    # Check in page sample links
-    if not download_url:
-        match = re.search(r'href=["\']([^"\']+\.([a-z0-9]{2,4}))["\'](?:\s+download)?', text)
-        if match:
-            cand_url = match.group(1)
-            ext = f".{match.group(2).lower()}"
-            if ext in RISKY_EXTENSIONS or ext in ARCHIVE_EXTENSIONS:
-                download_url = cand_url
-                file_name = cand_url.split("/")[-1]
-                file_ext = ext
+    class Links(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.links = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "a":
+                value = dict(attrs).get("href")
+                if value and len(self.links) < 200:
+                    self.links.append(value)
+
+    parser = Links()
+    parser.feed((html_sample or "")[:250000])
+    for cand_url in parser.links + page_data.get("download_urls", [])[:100]:
+        if download_url or not isinstance(cand_url, str):
+            continue
+        candidate_path = urlparse(cand_url).path.lower()
+        ext = next(
+            (ext for ext in RISKY_EXTENSIONS | ARCHIVE_EXTENSIONS if candidate_path.endswith(ext)),
+            None,
+        )
+        if ext:
+            download_url, file_name, file_ext = (
+                cand_url,
+                candidate_path.split("/")[-1][:100],
+                ext,
+            )
 
     if not download_url:
         return DownloadSafetyAssessment(
@@ -64,13 +95,17 @@ def analyze_download(
             file_name=None,
             file_extension=None,
             is_executable_or_script=False,
-            risk_level="SAFE",
-            explanation="No direct executable or binary file downloads detected on this webpage.",
+            risk_level="NO_DOWNLOAD_OBSERVED"
+            if page_available(page_data) or html_sample
+            else "UNKNOWN",
+            explanation="No supported download link observed in the completed checks. No file contents were scanned.",
+            availability="available" if page_available(page_data) or html_sample else "partial",
         )
 
     is_risky = file_ext in RISKY_EXTENSIONS
+    file_name = "redacted-file" + str(file_ext)
 
-    if is_risky and overall_trust < 60:
+    if is_risky and overall_trust is not None and overall_trust < 60:
         risk_level = "HIGH_RISK"
         explanation = (
             f"The download target '{file_name}' is an executable or script ({file_ext}) "
@@ -82,15 +117,17 @@ def analyze_download(
             f"The file '{file_name}' ({file_ext}) can execute code directly on your computer. "
             f"Confirm that you specifically intended to download this application."
         )
-    elif file_ext in ARCHIVE_EXTENSIONS and overall_trust < 50:
+    elif file_ext in ARCHIVE_EXTENSIONS and (overall_trust is None or overall_trust < 50):
         risk_level = "ATTENTION"
         explanation = (
             f"An archive file '{file_name}' ({file_ext}) is offered by an unverified source. "
             f"Inspect its contents carefully before extracting or executing programs."
         )
     else:
-        risk_level = "SAFE"
-        explanation = f"Standard document or media download '{file_name}' detected."
+        risk_level = "NO_ADDITIONAL_RISK_OBSERVED"
+        explanation = (
+            f"Archive download '{file_name}' detected. Its contents have not been scanned."
+        )
 
     return DownloadSafetyAssessment(
         has_download=True,
@@ -100,4 +137,3 @@ def analyze_download(
         risk_level=risk_level,
         explanation=explanation,
     )
-

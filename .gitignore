@@ -5,3 +5,7 @@ __pycache__/
 *.db
 node_modules/
 .next/
+.test-tmp/
+.ruff_cache/
+pytest-cache-files-*/
+*.tsbuildinfo

@@ -1,25 +1,37 @@
-from dataclasses import dataclass, field
-import numpy as np
-import os
-from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.calibration import CalibratedClassifierCV
-import xgboost as xgb
+"""Inference only; deploy a checksum-pinned, JSON-only artifact from the offline pipeline."""
 
-from .dataset import FEATURE_NAMES, FEATURE_GROUPS, generate_synthetic_dataset
+import hashlib
+import json
+import math
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import numpy as np
+
+from ..observations import page_available
+from .dataset import FEATURE_NAMES
+
+FEATURE_VERSION = "observations-v2"
 
 
 @dataclass(frozen=True)
 class Prediction:
-    risk: float  # Calibrated P(phishing) between 0.0 and 1.0
-    model_name: str = "xgboost-calibrated"
-    model_version: str = "1.0.0"
-    feature_version: str = "multimodal-v1"
-    calibrated_probability: float = 0.0
-    raw_probability: float = 0.0
-    calibration_method: str = "platt-scaling"
+    risk: float | None = None
+    model_name: str = "unavailable"
+    model_version: str = "none"
+    feature_version: str = FEATURE_VERSION
+    calibrated_probability: float | None = None
+    raw_probability: float | None = None
+    calibration_method: str | None = None
     feature_contributions: dict[str, float] = field(default_factory=dict)
-    is_phishing: bool = False
+    is_phishing: bool | None = None
+    availability: str = "unavailable"
+    reason: str | None = "No validated model artifact configured."
+    attribution_scale: str | None = None
+    base_value: float | None = None
+    missing_features: list[str] = field(default_factory=list)
+    threshold: float | None = None
 
 
 def extract_features_vector(
@@ -28,114 +40,132 @@ def extract_features_vector(
     page_analysis: dict | None = None,
     context: dict | None = None,
 ) -> np.ndarray:
-    """Extract a 31-dimensional feature vector from multimodal observations."""
-    vector = np.zeros(len(FEATURE_NAMES), dtype=np.float32)
-    domain = domain_analysis or {}
-    page = page_analysis or {}
-    ctx = context or {}
-
-    # URL Features
-    vector[0] = float(url_features.get("url_length", 30))
-    vector[1] = float(url_features.get("hostname_length", 15))
-    vector[2] = float(url_features.get("subdomain_count", 0))
-    vector[3] = float(url_features.get("dot_count", 1))
-    vector[4] = float(url_features.get("hyphen_count", 0))
-    vector[5] = float(url_features.get("special_character_count", 0))
-    vector[6] = 1.0 if url_features.get("ip_based_url") else 0.0
-    vector[7] = 1.0 if url_features.get("https") else 0.0
-    vector[8] = 1.0 if url_features.get("unusual_port") else 0.0
-    vector[9] = float(len(url_features.get("suspicious_keywords", [])))
-    vector[10] = 1.0 if url_features.get("percent_encoded") else 0.0
-
-    # Domain Features
-    a_records = domain.get("a_records", [])
-    aaaa_records = domain.get("aaaa_records", [])
-    tls = domain.get("tls", {})
-    vector[11] = 1.0 if (a_records and len(a_records) > 0) else 0.0
-    vector[12] = 1.0 if (aaaa_records and len(aaaa_records) > 0) else 0.0
-    vector[13] = 1.0 if (tls and tls.get("available")) else 0.0
-    vector[14] = float(domain.get("age_days", 365.0))
-    vector[15] = 1.0 if domain.get("tls_mismatch") else 0.0
-
-    # Webpage Features
-    vector[16] = float(page.get("forms", 0))
-    vector[17] = float(page.get("password_inputs", 0))
-    vector[18] = float(page.get("text_inputs", 1))
-    vector[19] = float(page.get("hidden_inputs", 0))
-    vector[20] = 1.0 if page.get("login_like") else 0.0
-    vector[21] = 1.0 if page.get("urgency_text") else 0.0
-
-    # Behavior Features
-    vector[22] = 1.0 if page.get("external_form_action") else 0.0
-    vector[23] = float(page.get("redirect_count", 0))
-    vector[24] = float(page.get("external_domain_count", 0))
-    vector[25] = 1.0 if page.get("initiates_download") else 0.0
-    vector[26] = 1.0 if page.get("script_heavy") else 0.0
-
-    # Context Features
-    vector[27] = 1.0 if (vector[17] > 0 and (not vector[7] or vector[6] > 0 or vector[9] > 1)) else 0.0
-    vector[28] = 1.0 if (vector[22] > 0 and vector[17] > 0) else 0.0
-    vector[29] = 1.0 if ctx.get("brand_name_mismatch") else 0.0
-    vector[30] = 1.0 if ctx.get("claimed_org_unverified") else 0.0
-
+    """One extraction path for training/inference. NaN represents an unobserved feature."""
+    vector = np.full(len(FEATURE_NAMES), np.nan, dtype=np.float64)
+    domain, page, ctx = domain_analysis or {}, page_analysis or {}, context or {}
+    url_mapping = [
+        "url_length",
+        "hostname_length",
+        "subdomain_count",
+        "dot_count",
+        "hyphen_count",
+        "special_character_count",
+        "ip_based_url",
+        "https",
+        "unusual_port",
+        "suspicious_keywords",
+        "percent_encoded",
+    ]
+    for index, key in enumerate(url_mapping):
+        if key in url_features and url_features[key] is not None:
+            value = len(url_features[key]) if key == "suspicious_keywords" else url_features[key]
+            vector[index] = float(value)
+    if (
+        domain.get("dns", {}).get("available")
+        or domain.get("dns_available")
+        or domain.get("a_records")
+        or domain.get("aaaa_records")
+    ):
+        vector[11:13] = [
+            bool(domain.get("a_records")),
+            bool(domain.get("aaaa_records")),
+        ]
+    tls = domain.get("tls") or {}
+    if tls.get("available") is True:
+        vector[13] = 1
+    if domain.get("age_days") is not None:
+        vector[14] = float(domain["age_days"])
+    if domain.get("tls_mismatch") is not None and tls.get("available"):
+        vector[15] = float(domain["tls_mismatch"])
+    page_mapping = [
+        "forms",
+        "password_inputs",
+        "text_inputs",
+        "hidden_inputs",
+        "login_like",
+        "urgency_text",
+        "external_form_action",
+        "redirect_count",
+        "external_domain_count",
+        "initiates_download",
+        "script_heavy",
+    ]
+    if page_available(page):
+        for offset, key in enumerate(page_mapping, 16):
+            if key in page and page[key] is not None:
+                vector[offset] = float(page[key])
+        if all(np.isfinite(vector[i]) for i in [6, 7, 9, 17]):
+            vector[27] = float(
+                vector[17] > 0 and (vector[7] == 0 or vector[6] > 0 or vector[9] > 1)
+            )
+        if np.isfinite(vector[17]) and page.get("destination_relationship"):
+            vector[28] = float(vector[17] > 0 and page["destination_relationship"] == "unrelated")
+    for index, key in [(29, "brand_name_mismatch"), (30, "claimed_org_unverified")]:
+        if ctx.get(key) is not None:
+            vector[index] = float(ctx[key])
+    finite = vector[np.isfinite(vector)]
+    if np.any(finite < 0) or np.any(finite > 1_000_000):
+        raise ValueError("Feature outside supported nonnegative bounds")
+    count_indices = list(range(6)) + [9, 14, 16, 17, 18, 19, 23, 24]
+    if any(np.isfinite(vector[i]) and vector[i] != int(vector[i]) for i in count_indices):
+        raise ValueError("Count features must be integer-valued")
+    binary_indices = set(range(len(FEATURE_NAMES))) - set(count_indices)
+    if any(np.isfinite(vector[i]) and vector[i] not in (0, 1) for i in binary_indices):
+        raise ValueError("Boolean features must be zero or one")
     return vector
 
 
+def sigmoid(value: float) -> float:
+    return 1 / (1 + math.exp(-max(-700, min(700, value))))
+
+
 class ThreatModel:
-    """
-    Production-grade ML engine featuring:
-    - Primary model: Calibrated XGBoost (P(phishing))
-    - Baseline models: Random Forest & Logistic Regression
-    - Probability Calibration: Platt scaling (CalibratedClassifierCV sigmoid)
-    - Full explainability & multimodal feature attribution
-    """
-
-    _instance = None
-
-    def __init__(self, random_state: int = 42):
-        self.random_state = random_state
-        self._is_trained = False
-        self.primary_model = None
-        self.rf_baseline = None
-        self.lr_baseline = None
-        self._train_models()
-
-    def _train_models(self) -> None:
-        X, y = generate_synthetic_dataset(n_samples=1600, random_state=self.random_state)
-
-        # 1. Primary Model: XGBoost with Platt scaling calibration
-        base_xgb = xgb.XGBClassifier(
-            n_estimators=60,
-            max_depth=4,
-            learning_rate=0.08,
-            subsample=0.85,
-            colsample_bytree=0.85,
-            eval_metric="logloss",
-            random_state=self.random_state,
-        )
-        self.primary_model = CalibratedClassifierCV(
-            estimator=base_xgb,
-            method="sigmoid",  # Platt scaling
-            cv=3,
-        )
-        self.primary_model.fit(X, y)
-
-        # 2. Baseline Model 1: Random Forest
-        self.rf_baseline = RandomForestClassifier(
-            n_estimators=50,
-            max_depth=5,
-            random_state=self.random_state,
-        )
-        self.rf_baseline.fit(X, y)
-
-        # 3. Baseline Model 2: Logistic Regression (L2 regularized)
-        self.lr_baseline = LogisticRegression(
-            max_iter=500,
-            random_state=self.random_state,
-        )
-        self.lr_baseline.fit(X, y)
-
-        self._is_trained = True
+    def __init__(
+        self,
+        random_state: int = 42,
+        artifact_path: str | None = None,
+        expected_checksum: str | None = None,
+    ):
+        self.artifact = None
+        self.reason = "No validated model artifact configured."
+        path = artifact_path or os.getenv("ML_ARTIFACT_PATH")
+        checksum = expected_checksum or os.getenv("ML_ARTIFACT_SHA256")
+        if not path:
+            return
+        try:
+            if not checksum or len(checksum) != 64:
+                raise ValueError("An explicit artifact SHA-256 is required")
+            file = Path(path)
+            if file.stat().st_size > 1_000_000:
+                raise ValueError("Artifact exceeds size limit")
+            raw = file.read_bytes()
+            if hashlib.sha256(raw).hexdigest() != checksum.lower():
+                raise ValueError("Artifact checksum mismatch")
+            data = json.loads(raw)
+            if (
+                data.get("feature_version") != FEATURE_VERSION
+                or data.get("feature_names") != FEATURE_NAMES
+            ):
+                raise ValueError("Incompatible feature schema")
+            if data.get("format") != "m-phish-linear-v1" or data.get("release_gate") != "passed":
+                raise ValueError("Artifact has not passed its scoped detection gates")
+            n = len(FEATURE_NAMES)
+            for key, length in [
+                ("median", n),
+                ("mean", 2 * n),
+                ("scale", 2 * n),
+                ("coefficients", 2 * n),
+            ]:
+                if len(data[key]) != length or not all(math.isfinite(float(v)) for v in data[key]):
+                    raise ValueError("Invalid numeric artifact shape")
+            if any(v <= 0 for v in data["scale"]) or not 0 <= data["threshold"] <= 1:
+                raise ValueError("Invalid preprocessing/threshold")
+            for key in ["intercept", "calibration_slope", "calibration_intercept"]:
+                if not math.isfinite(float(data[key])):
+                    raise ValueError("Nonfinite model parameter")
+            self.artifact, self.reason = data, None
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            self.reason = f"Model unavailable: {type(exc).__name__}: {exc}"
 
     def predict_multimodal(
         self,
@@ -144,42 +174,66 @@ class ThreatModel:
         page_analysis: dict | None = None,
         context: dict | None = None,
     ) -> Prediction:
-        """Predict calibrated probability of phishing given multimodal features."""
         vector = extract_features_vector(url_features, domain_analysis, page_analysis, context)
-        vector_2d = vector.reshape(1, -1)
-
-        # Calibrated probability from primary XGBoost model
-        probs = self.primary_model.predict_proba(vector_2d)[0]
-        calibrated_prob = float(np.clip(probs[1], 0.0, 1.0))
-
-        # Calculate group contributions
-        contributions = {}
-        for group, indices in FEATURE_GROUPS.items():
-            sub_vec = vector[indices]
-            # normalized signal presence in this group
-            val = float(np.mean(sub_vec > 0)) if len(sub_vec) > 0 else 0.0
-            contributions[group] = round(val, 2)
-
-        is_phishing = calibrated_prob >= 0.5
-
+        missing = [
+            name
+            for name, value in zip(FEATURE_NAMES, vector, strict=True)
+            if not np.isfinite(value)
+        ]
+        if self.artifact is None:
+            return Prediction(reason=self.reason, missing_features=missing)
+        artifact = self.artifact
+        # A model is eligible only for the modality/missingness scope represented in its training manifest.
+        pattern = "".join("1" if not np.isfinite(v) else "0" for v in vector)
+        if pattern not in artifact.get("supported_missingness_patterns", []):
+            return Prediction(
+                reason="Observation coverage is outside the validated model scope.",
+                missing_features=missing,
+            )
+        for i, (minimum, maximum) in enumerate(artifact["feature_ranges"]):
+            if (
+                np.isfinite(vector[i])
+                and minimum is not None
+                and not minimum <= vector[i] <= maximum
+            ):
+                return Prediction(
+                    reason="Observation is outside validated feature ranges.",
+                    missing_features=missing,
+                )
+        filled = np.where(np.isfinite(vector), vector, artifact["median"])
+        expanded = np.concatenate([filled, (~np.isfinite(vector)).astype(float)])
+        standard = (expanded - artifact["mean"]) / artifact["scale"]
+        contributions = standard * artifact["coefficients"]
+        margin = float(np.sum(contributions) + artifact["intercept"])
+        raw = sigmoid(margin)
+        calibrated = sigmoid(
+            margin * artifact["calibration_slope"] + artifact["calibration_intercept"]
+        )
+        names = FEATURE_NAMES + [name + "__missing" for name in FEATURE_NAMES]
         return Prediction(
-            risk=round(calibrated_prob, 3),
-            calibrated_probability=round(calibrated_prob, 3),
-            raw_probability=round(calibrated_prob, 3),
-            model_name="xgboost-platt-calibrated",
-            model_version="1.0.0",
-            feature_version="multimodal-v1",
-            calibration_method="platt-scaling",
-            feature_contributions=contributions,
-            is_phishing=is_phishing,
+            calibrated,
+            "logistic-regression-calibrated",
+            artifact["model_version"],
+            FEATURE_VERSION,
+            calibrated,
+            raw,
+            "held-out-sigmoid",
+            dict(zip(names, map(float, contributions), strict=True)),
+            calibrated >= artifact["threshold"],
+            "available",
+            None,
+            "raw_log_odds",
+            float(artifact["intercept"]),
+            missing,
+            artifact["threshold"],
         )
 
     def predict(self, features: dict) -> Prediction:
-        """Backward-compatible method for single URL feature dict."""
         return self.predict_multimodal(features)
 
 
 _global_model: ThreatModel | None = None
+
 
 def get_threat_model() -> ThreatModel:
     global _global_model

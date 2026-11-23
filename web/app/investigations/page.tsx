@@ -1,104 +1,12 @@
-"use client";
-import { useEffect, useMemo, useState } from "react";
+﻿"use client";
+import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
-import { Search, SlidersHorizontal } from "lucide-react";
 import { listInvestigations, Report } from "../../lib/api";
 import { RiskBadge } from "../../components/risk";
-
-export default function Investigations() {
-  const [reports, setReports] = useState<Report[]>([]);
-  const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState("ALL");
-  const [error, setError] = useState("");
-  useEffect(() => {
-    listInvestigations()
-      .then(setReports)
-      .catch((e) =>
-        setError(e instanceof Error ? e.message : "History is unavailable."),
-      );
-  }, []);
-  const visible = useMemo(
-    () =>
-      reports.filter(
-        (report) =>
-          (filter === "ALL" || report.classification === filter) &&
-          `${report.hostname} ${report.url}`
-            .toLowerCase()
-            .includes(query.toLowerCase()),
-      ),
-    [reports, query, filter],
-  );
-  return (
-    <main className="investigations-page">
-      <div className="section-head">
-        <div>
-          <div className="eyebrow">
-            <SlidersHorizontal size={13} /> Intelligence workspace
-          </div>
-          <h1>Investigations</h1>
-          <p className="subtle">
-            A traceable record of every website reviewed by the engine.
-          </p>
-        </div>
-      </div>
-      <div className="list-tools">
-        <label>
-          <Search size={15} />
-          <input
-            aria-label="Search investigations"
-            placeholder="Search target or URL"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </label>
-        <select
-          aria-label="Filter classification"
-          value={filter}
-          onChange={(event) => setFilter(event.target.value)}
-        >
-          <option value="ALL">All classifications</option>
-          <option value="LOW">Low</option>
-          <option value="MEDIUM">Medium</option>
-          <option value="HIGH">High</option>
-          <option value="CRITICAL">Critical</option>
-        </select>
-      </div>
-      <div className="surface recent">
-        {error ? (
-          <div className="empty" role="alert">
-            {error}
-          </div>
-        ) : visible.length ? (
-          visible.map((report) => (
-            <Link
-              className="recent-row"
-              href={`/investigations/${report.id}`}
-              key={report.id}
-            >
-              <div>
-                <div className="url">{report.hostname}</div>
-                <div className="date">
-                  {report.url} ·{" "}
-                  {report.created_at
-                    ? new Date(report.created_at).toLocaleString()
-                    : "Completed"}
-                </div>
-              </div>
-              <div className="row-summary">
-                <span>{report.evidence.length} evidence</span>
-                <RiskBadge classification={report.classification} />
-                <b>{report.risk_score}</b>
-              </div>
-            </Link>
-          ))
-        ) : (
-          <div className="empty">
-            {reports.length
-              ? "No investigations match these filters."
-              : "No investigations yet. Start from the dashboard."}
-          </div>
-        )}
-      </div>
-    </main>
-  );
+import { ErrorNotice, RequireSession, useSession } from "../../components/auth";
+import { formatDate } from "../../components/report";
+export default function Investigations() { const { user } = useSession(); const [reports, setReports] = useState<Report[]>([]); const [query, setQuery] = useState(""); const [search, setSearch] = useState(""); const [filter, setFilter] = useState("ALL"); const [sort, setSort] = useState("newest"); const [page, setPage] = useState(0); const [loading, setLoading] = useState(true); const [error, setError] = useState<unknown>(null); const [refresh, setRefresh] = useState(0);
+ useEffect(() => { if (!user) return; let active = true; setLoading(true); listInvestigations({ limit: 20, offset: page * 20, q: search, classification: filter, sort }).then(values => { if (active) { setReports(values); setError(null); } }).catch(e => { if (active) { setError(e); setReports([]); } }).finally(() => { if (active) setLoading(false); }); return () => { active = false; }; }, [user, page, search, filter, sort, refresh]);
+ function submit(e: FormEvent) { e.preventDefault(); setPage(0); setSearch(query); }
+ return <RequireSession><main className="investigations-page"><div className="section-head"><div><div className="eyebrow">Private account history</div><h1>Investigations</h1><p className="subtle">Your stored investigations. No-history scans and isolated demos are excluded.</p></div><Link className="primary-action" href="/">New investigation</Link></div><form className="list-tools" onSubmit={submit}><label>Search<input aria-label="Search investigations" maxLength={200} value={query} onChange={e => setQuery(e.target.value)} /></label><button className="secondary-action">Search</button><label>Risk<select value={filter} onChange={e => { setFilter(e.target.value); setPage(0); }}>{["ALL", "UNKNOWN", "LOW", "MEDIUM", "HIGH", "CRITICAL"].map(v => <option key={v}>{v}</option>)}</select></label><label>Sort<select value={sort} onChange={e => { setSort(e.target.value); setPage(0); }}><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label></form><ErrorNotice error={error} />{!!error && <button onClick={() => setRefresh(n => n + 1)}>Retry</button>}<section className="surface recent" aria-busy={loading}>{loading ? <p className="empty" role="status">Loading history…</p> : reports.length ? reports.map(report => <Link className="recent-row" href={"/investigations/" + report.id} key={report.id}><div><strong>{report.hostname || report.url}</strong><p className="date">{formatDate(report.created_at)} · {report.status || "UNKNOWN"}</p></div><div className="row-summary"><span>{report.evidence?.length ?? 0} evidence items</span><RiskBadge classification={report.classification || "UNKNOWN"} /></div></Link>) : !error && <p className="empty">No investigations match this page. Start a scan or change the filters.</p>}</section><div className="button-row"><button className="secondary-action" disabled={page === 0 || loading} onClick={() => setPage(n => n - 1)}>Previous</button><span>Page {page + 1}</span><button className="secondary-action" disabled={reports.length < 20 || loading} onClick={() => setPage(n => n + 1)}>Next</button></div></main></RequireSession>;
 }

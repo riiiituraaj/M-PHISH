@@ -1,5 +1,5 @@
 {
-  "dependencies": {
-    "python": "^0.0.4"
-  }
+  "name": "m-phish-workspace",
+  "private": true,
+  "scripts": {"verify": "python scripts/verify.py"}
 }

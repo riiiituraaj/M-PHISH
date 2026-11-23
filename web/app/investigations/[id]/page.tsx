@@ -1,15 +1,13 @@
+﻿"use client";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { getReport } from "../../../lib/api";
+import { downloadExport, getReport, getSettings, jobAction, Report, Settings } from "../../../lib/api";
 import { ReportWorkspace } from "../../../components/report";
-
-export default async function Report({ params }: { params: { id: string } }) {
-  const report = await getReport(params.id);
-  return (
-    <main className="report">
-      <Link className="back" href="/">
-        ← Back to overview
-      </Link>
-      <ReportWorkspace report={report} />
-    </main>
-  );
+import { ErrorNotice, RequireSession, useSession } from "../../../components/auth";
+import { useParams, useRouter } from "next/navigation";
+export default function InvestigationPage() { const params = useParams<{ id: string }>(); const id = params.id; const router = useRouter(); const { user } = useSession(); const [report, setReport] = useState<Report | null>(null); const [error, setError] = useState<unknown>(null); const [busy, setBusy] = useState(false); const [refresh, setRefresh] = useState(0); const [preferences, setPreferences] = useState<Settings | null>(null); const [notice, setNotice] = useState(""); const previousStatus = useRef(""); useEffect(() => { if (user) getSettings().then(setPreferences).catch(setError); }, [user]); useEffect(() => { if (report?.status === "COMPLETED" && ["QUEUED", "ANALYZING", "RETRYING"].includes(previousStatus.current) && preferences?.notifications_enabled) setNotice("Your investigation has completed. Review its evidence and limitations below."); previousStatus.current = report?.status || ""; }, [report, preferences]);
+ useEffect(() => { if (!user) return; setReport(null); let active = true; let timer: ReturnType<typeof setTimeout>; async function load() { try { const value = await getReport(id); if (!active) return; setReport(value); setError(null); if (["QUEUED", "ANALYZING", "RETRYING"].includes(value.status || "")) timer = setTimeout(load, 1500); } catch (e) { if (active) setError(e); } } void load(); return () => { active = false; clearTimeout(timer); }; }, [id, user, refresh]);
+ async function action(value: "cancel" | "retry" | "delete") { if (value === "delete" && !window.confirm("Delete this investigation and its stored report?")) return; setBusy(true); try { await jobAction(id, value); if (value === "delete") router.push("/investigations"); else setRefresh(n => n + 1); } catch (e) { setError(e); } finally { setBusy(false); } }
+ const pending = ["QUEUED", "ANALYZING", "RETRYING"].includes(report?.status || "");
+ return <RequireSession><main className="report"><Link className="back" href="/investigations">← Investigation history</Link><ErrorNotice error={error} />{notice && <p className="notice" role="status">{notice}</p>}{!!error && <button className="secondary-action" onClick={() => setRefresh(n => n + 1)}>Retry loading</button>}{!report && !error && <p role="status">Loading investigation…</p>}{report && <><div className="button-row"><span role="status">Job: {report.status || "UNKNOWN"}</span>{pending && <button className="secondary-action" disabled={busy} onClick={() => void action("cancel")}>Cancel investigation</button>}{["FAILED", "CANCELLED"].includes(report.status || "") && <button className="secondary-action" disabled={busy} onClick={() => void action("retry")}>Retry investigation</button>}{report.status === "COMPLETED" && (["json", "pdf"] as const).map(format => <button className="secondary-action" key={format} onClick={() => void downloadExport(id, format).catch(setError)}>Export {format.toUpperCase()}</button>)}<button className="secondary-action" disabled={busy} onClick={() => void action("delete")}>Delete</button></div>{pending ? <section className="surface setting-card" aria-live="polite"><h1>{report.status === "QUEUED" ? "Waiting for a worker" : "Investigation in progress"}</h1><p>{report.url}</p><p>No risk result is available yet. You can leave this page and return from history.</p></section> : report.status === "COMPLETED" ? <ReportWorkspace report={report} level={preferences?.knowledge_level} /> : <section className="surface setting-card"><h1>Investigation {report.status?.toLowerCase()}</h1><p>No completed assessment is available. Retry after checking service availability.</p></section>}</>}</main></RequireSession>;
 }

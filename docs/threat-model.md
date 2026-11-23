@@ -1,13 +1,11 @@
-# Threat Model
+# Threat model and residual risks
 
-## SSRF
+Assets: account credentials/sessions, private reports, provider secrets, service network, queue capacity and users' interpretation of evidence. Untrusted boundaries include target URLs/DNS/redirects/content, browser messages, model artifacts and provider output.
 
-User URLs are limited to HTTP(S). Localhost, loopback, private, link-local, and reserved addresses are rejected, including DNS resolutions that return those ranges. Redirect validation must be repeated inside any future remote crawler.
+Controls implemented and regression-tested include owner-scoped access, exact-origin checks, opaque hashed sessions, bounded schemas/quotas, single-use pairing, DNS/redirect/IP restrictions, peer verification, subprocess deadline, escaped exports, safe output rendering, client/server provenance separation, stale-result invalidation, offline model training and provider output grounding.
 
-## Untrusted pages
+Deployment must independently enforce collector egress. Application URL checks alone are insufficient against network/configuration mistakes. Real Linux firewall behavior, PostgreSQL locking, Redis crash recovery and restore rehearsal remain unverified. Aggregate queue admission has a residual race across different owners; enforce infrastructure capacity and monitor depth until this is load-tested and hardened.
 
-The current local analyzer reads only bundled harmless samples. A remote Playwright worker must use a disposable browser context, timeouts, redirect and response-size limits, a non-root restricted container, and no host mounts before enablement.
+A malicious page can remove or spoof page-injected warnings and transmit data outside native submissions. Trusted-click checks prevent programmatic use of the extension's override button but do not turn the page into a trusted UI. DOM categories and client observations are claims with separate provenance. Synthetic language, brand mentions, TLS and shared infrastructure alone do not establish fraud or legitimacy.
 
-## Abuse
-
-Investigation endpoints have a configurable in-process rate limit for local protection. Production deployments should enforce authenticated tenant/IP quotas at the gateway and retain structured audit events.
+No real-world detection operating point, independent penetration test, uptime commitment or legal certification is claimed. See FEATURE_MATRIX.md for incomplete feature-specific validation.

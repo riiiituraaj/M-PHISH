@@ -1,5 +1,7 @@
-name: CI
+name: Verify and package
 on: [push, pull_request]
+permissions:
+  contents: read
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -7,15 +9,28 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
-      - run: python -m pip install -r backend/requirements.txt pytest
-      - run: python -m pytest backend/tests
       - uses: actions/setup-node@v4
         with: {node-version: '22'}
-      - run: npm ci
+      - run: python scripts/verify.py
+      - run: python scripts/release.py
+      - run: python -m pip_audit -r backend/requirements.lock --format json --output artifacts/verification/python-audit.json
+      - run: npm audit --audit-level=high --json > ../artifacts/verification/web-audit.json
         working-directory: web
-      - run: npm run build
-        working-directory: web
-      - run: npm ci
+      - run: npm audit --audit-level=high --json > ../artifacts/verification/extension-audit.json
         working-directory: extension
-      - run: npm run build
-        working-directory: extension
+      - run: python -m playwright install --with-deps chromium
+      - run: |
+          npm --prefix web run start > artifacts/verification/web-server.log 2>&1 &
+          python -c "import time; time.sleep(5)"
+          python web/tests/browser_smoke.py
+          python extension/tests/browser.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verification-and-extension
+          path: |
+            artifacts/verification/
+            artifacts/release/
+            extension/release/
+            extension/test-results/*.json
+            web/artifacts/browser/

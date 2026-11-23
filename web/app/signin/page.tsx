@@ -1,0 +1,9 @@
+"use client";
+import { FormEvent, useState } from "react";
+import { useRouter } from "next/navigation";
+import { signIn } from "../../lib/api";
+import { ErrorNotice, useSession } from "../../components/auth";
+export default function SignIn() { const { refresh } = useSession(); const router = useRouter(); const [register, setRegister] = useState(false); const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [busy, setBusy] = useState(false); const [error, setError] = useState<unknown>(null);
+ async function submit(e: FormEvent) { e.preventDefault(); setBusy(true); setError(null); try { await signIn(email, password, register); setPassword(""); await refresh(); router.replace("/"); } catch (e) { setError(e); } finally { setBusy(false); } }
+ return <main className="auth-page"><section className="surface setting-card"><div className="eyebrow">Private investigations</div><h1>{register ? "Create an account" : "Sign in"}</h1><p className="subtle">Self-registration is available only when enabled by the service operator.</p><form className="stack-form" onSubmit={submit}><label>Email<input type="email" autoComplete="username" required maxLength={254} value={email} onChange={e => setEmail(e.target.value)} /></label><label>Password<input type="password" autoComplete={register ? "new-password" : "current-password"} minLength={register ? 12 : undefined} maxLength={128} required value={password} onChange={e => setPassword(e.target.value)} /></label><button className="primary-action" disabled={busy}>{busy ? "Please wait…" : register ? "Create account" : "Sign in"}</button><ErrorNotice error={error} /></form><button className="text-button" onClick={() => { setRegister(!register); setError(null); }}>{register ? "Use an existing account" : "Create an account"}</button></section></main>;
+}

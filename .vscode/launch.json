@@ -1,0 +1,80 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Backend: API (port 8000)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["backend.app.main:app", "--host", "127.0.0.1", "--port", "8000"],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "env": { "DATABASE_URL": "sqlite:///backend/m_phish.db" },
+      "preLaunchTask": "Backend: migrate database",
+      "justMyCode": true
+    },
+    {
+      "name": "Backend: collector (port 8001)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["backend.app.collector:app", "--host", "127.0.0.1", "--port", "8001"],
+      "cwd": "${workspaceFolder}",
+      "justMyCode": true
+    },
+    {
+      "name": "Backend: local worker (no Redis, works on Windows)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/local_worker.py",
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "DATABASE_URL": "sqlite:///backend/m_phish.db",
+        "CRAWLER_URL": "http://127.0.0.1:8001"
+      },
+      "justMyCode": true
+    },
+    {
+      "name": "Backend: dispatcher (needs Redis, Linux/Docker)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "backend.app.jobs",
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "Backend: pytest (all)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["backend/tests", "-q"],
+      "cwd": "${workspaceFolder}",
+      "justMyCode": false
+    },
+    {
+      "name": "Dashboard: Next.js dev (port 3000)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run dev",
+      "cwd": "${workspaceFolder}/web"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Full app (API + collector + local worker + dashboard)",
+      "configurations": [
+        "Backend: API (port 8000)",
+        "Backend: collector (port 8001)",
+        "Backend: local worker (no Redis, works on Windows)",
+        "Dashboard: Next.js dev (port 3000)"
+      ],
+      "stopAll": true
+    },
+    {
+      "name": "API + Dashboard",
+      "configurations": ["Backend: API (port 8000)", "Dashboard: Next.js dev (port 3000)"],
+      "stopAll": true
+    }
+  ]
+}

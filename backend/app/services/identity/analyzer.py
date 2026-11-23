@@ -1,19 +1,50 @@
-from dataclasses import dataclass
-from urllib.parse import urlparse
 import re
+from dataclasses import dataclass
+from html.parser import HTMLParser
+
+from ..observations import (
+    destination_relationship,
+    host_matches,
+    normalized_host,
+    page_available,
+    registrable_domain,
+)
+
+CATALOG_VERSION = "2026-11-03.1"
+CATALOG_SOURCES = {
+    "Google Account": "https://developers.google.com/identity/protocols/oauth2/web-server",
+    "Microsoft Account": "https://learn.microsoft.com/en-us/entra/identity-platform/v2-protocols-oidc",
+}
 
 # Known legitimate service catalog with official primary domains and human brands
 KNOWN_SERVICES = [
     {
         "brand": "Google Account",
         "keywords": ["google", "gmail", "youtube", "google drive"],
-        "official_domains": ["google.com", "accounts.google.com", "youtube.com", "gmail.com"],
+        "official_domains": [
+            "google.com",
+            "accounts.google.com",
+            "youtube.com",
+            "gmail.com",
+        ],
         "safe_route": "https://accounts.google.com",
     },
     {
         "brand": "Microsoft Account",
-        "keywords": ["microsoft", "office365", "outlook", "live.com", "onedrive", "azure"],
-        "official_domains": ["microsoft.com", "login.microsoftonline.com", "live.com", "outlook.com"],
+        "keywords": [
+            "microsoft",
+            "office365",
+            "outlook",
+            "live.com",
+            "onedrive",
+            "azure",
+        ],
+        "official_domains": [
+            "microsoft.com",
+            "login.microsoftonline.com",
+            "live.com",
+            "outlook.com",
+        ],
         "safe_route": "https://login.microsoftonline.com",
     },
     {
@@ -31,7 +62,12 @@ KNOWN_SERVICES = [
     {
         "brand": "Amazon",
         "keywords": ["amazon", "amazon prime", "aws"],
-        "official_domains": ["amazon.com", "amazon.in", "amazon.co.uk", "aws.amazon.com"],
+        "official_domains": [
+            "amazon.com",
+            "amazon.in",
+            "amazon.co.uk",
+            "aws.amazon.com",
+        ],
         "safe_route": "https://www.amazon.com",
     },
     {
@@ -54,7 +90,11 @@ KNOWN_SERVICES = [
     },
     {
         "brand": "National Scholarship Portal",
-        "keywords": ["scholarship portal", "national scholarship", "student scholarship"],
+        "keywords": [
+            "scholarship portal",
+            "national scholarship",
+            "student scholarship",
+        ],
         "official_domains": ["scholarships.gov.in"],
         "safe_route": "https://scholarships.gov.in",
     },
@@ -76,115 +116,104 @@ class IdentityAnalysis:
     explanation: str
     safe_route: str | None
     is_impersonation_suspected: bool
+    availability: str = "available"
+    destination_relationship: str = "unknown"
+    catalog_version: str = CATALOG_VERSION
+    catalog_source: str | None = None
 
 
 def extract_base_domain(host: str) -> str:
-    """Extract standard second-level domain (e.g., login.example.com -> example.com)."""
-    parts = host.lower().split(".")
-    if len(parts) >= 2:
-        return ".".join(parts[-2:])
-    return host.lower()
+    """Return a registrable domain using the bundled Public Suffix List."""
+    return registrable_domain(host)
 
 
-def analyze_identity(
-    url: str,
-    page_data: dict,
-    html_sample: str = "",
-) -> IdentityAnalysis:
-    """
-    Evaluate:
-    1. What does the page claim to be?
-    2. What is the current website domain?
-    3. Where does submitted information actually appear to go?
-    """
-    parsed = urlparse(url)
-    current_host = (parsed.hostname or "").lower()
-    current_base = extract_base_domain(current_host)
-    
-    title = page_data.get("title", "").lower()
-    forms = page_data.get("forms", 0)
-    has_password = page_data.get("password_inputs", 0) > 0
-    form_action = page_data.get("form_action_url") or ""
-    
-    # Destination domain
-    if form_action and form_action.startswith("http"):
-        dest_host = (urlparse(form_action).hostname or "").lower()
-    elif page_data.get("external_form_action"):
-        dest_host = "external-unrelated-domain.com"
-    else:
-        dest_host = current_host
+class _BrandText(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.depth = 0
+        self.parts = []
 
-    # Search for claimed brand in title, URL, or sample text
-    matched_brand = None
-    search_corpus = f"{title} {url.lower()} {html_sample.lower()}"
-    
-    for service in KNOWN_SERVICES:
-        for kw in service["keywords"]:
-            if kw in search_corpus:
-                matched_brand = service
-                break
-        if matched_brand:
-            break
+    def handle_starttag(self, tag, attrs):
+        if tag in {"h1", "h2", "title", "button"}:
+            self.depth += 1
 
-    if matched_brand:
-        claimed_service = matched_brand["brand"]
-        # Check if current host matches official domains
-        is_official = any(
-            current_host == d or current_host.endswith(f".{d}")
-            for d in matched_brand["official_domains"]
-        )
+    def handle_endtag(self, tag):
+        if tag in {"h1", "h2", "title", "button"}:
+            self.depth = max(0, self.depth - 1)
 
-        dest_is_official = any(
-            dest_host == d or dest_host.endswith(f".{d}")
-            for d in matched_brand["official_domains"]
-        )
+    def handle_data(self, data):
+        if self.depth:
+            self.parts.append(data[:500])
 
-        if is_official and dest_is_official:
-            consistency = "HIGH"
-            explanation = (
-                f"The website address ({current_host}) and credential submission destination "
-                f"match the official verified infrastructure for {claimed_service}."
-            )
-            safe_route = None
-            suspected = False
-        else:
-            consistency = "LOW"
-            explanation = (
-                f"This page appears to represent {claimed_service}, but the website address "
-                f"({current_host}) does not belong to {claimed_service}."
-            )
-            if dest_host != current_host:
-                explanation += f" Furthermore, credentials appear to be submitted to an external destination ({dest_host})."
-            safe_route = matched_brand["safe_route"]
-            suspected = True
 
-    else:
-        # Generic or independent website
-        claimed_service = page_data.get("title") or current_host or "Independent Website"
-        if dest_host != current_host and (forms > 0 or has_password):
-            consistency = "LOW"
-            explanation = (
-                f"This website ({current_host}) contains forms that submit your information "
-                f"to a different website ({dest_host})."
-            )
-            suspected = True
-            safe_route = None
-        else:
-            consistency = "HIGH" if (forms == 0 or dest_host == current_host) else "MEDIUM"
-            explanation = (
-                f"Based on available evidence, the website address ({current_host}) "
-                f"is consistent with its internal resource destinations."
-            )
-            suspected = False
-            safe_route = None
-
-    return IdentityAnalysis(
-        claimed_service=claimed_service,
-        current_website=current_host,
-        credential_destination=dest_host,
-        identity_consistency=consistency,
-        explanation=explanation,
-        safe_route=safe_route,
-        is_impersonation_suspected=suspected,
+def analyze_identity(url: str, page_data: dict, html_sample: str = "") -> IdentityAnalysis:
+    host = normalized_host(url)
+    observed = page_available(page_data) or bool(html_sample)
+    action = page_data.get("form_action_url") or ""
+    relation = destination_relationship(url, action) if observed else "unknown"
+    dest_host = (
+        normalized_host(__import__("urllib.parse", fromlist=["urljoin"]).urljoin(url, action))
+        if observed
+        else ""
     )
-
+    has_password = (page_data.get("password_inputs") or 0) > 0
+    parser = _BrandText()
+    parser.feed((html_sample or "")[:250000])
+    purpose = " ".join([str(page_data.get("title", ""))] + parser.parts).lower()
+    # Body text and URL mentions alone do not establish an identity assertion.
+    brand = next(
+        (
+            service
+            for service in KNOWN_SERVICES
+            if any(
+                re.search(r"\b" + re.escape(keyword) + r"\b", purpose)
+                for keyword in service["keywords"]
+            )
+        ),
+        None,
+    )
+    claimed = brand["brand"] if brand else page_data.get("title") or host
+    source = CATALOG_SOURCES.get(claimed)
+    official = bool(brand and any(host_matches(host, d) for d in brand["official_domains"]))
+    authentication_claim = has_password and bool(
+        re.search(r"sign in|log ?in|account|verify|password", purpose)
+    )
+    suspected = bool(
+        observed
+        and brand
+        and authentication_claim
+        and not official
+        and relation not in {"known_identity_provider", "known_payment_provider"}
+    )
+    if not observed:
+        consistency, explanation = (
+            "UNKNOWN",
+            "Page content was unavailable; no identity claim or destination was evaluated.",
+        )
+    elif suspected:
+        consistency = "LOW"
+        explanation = f"An authentication form presents {claimed} branding on {host}, outside the catalogued domains. This is a suspected identity mismatch, not proof of ownership or intent."
+    elif official:
+        consistency = "HIGH"
+        explanation = "The hostname matches a catalogued service domain. This does not certify the page or any transaction."
+    elif relation in {"known_identity_provider", "known_payment_provider"}:
+        consistency = "MEDIUM"
+        explanation = "The form destination matches a known identity/payment provider. Cross-domain submission alone is not evidence of theft; the integration has not been verified."
+    else:
+        consistency = "UNKNOWN"
+        explanation = "No supported authentication-brand mismatch was observed. An independent site's identity has not been verified."
+    # Only currently sourced catalog entries may produce navigation guidance.
+    route = brand["safe_route"] if suspected and source else None
+    return IdentityAnalysis(
+        claimed,
+        host,
+        dest_host,
+        consistency,
+        explanation,
+        route,
+        suspected,
+        "available" if observed else "unavailable",
+        relation,
+        CATALOG_VERSION,
+        source,
+    )

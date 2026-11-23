@@ -5,7 +5,14 @@ import sys
 
 class JsonFormatter(logging.Formatter):
     def format(self, record):
-        return json.dumps({"timestamp": self.formatTime(record, self.datefmt), "level": record.levelname, "event": record.getMessage(), "module": record.name})
+        return json.dumps(
+            {
+                "timestamp": self.formatTime(record, self.datefmt),
+                "level": record.levelname,
+                "event": record.getMessage(),
+                "module": record.name,
+            }
+        )
 
 
 def configure_logging(level: str) -> None:

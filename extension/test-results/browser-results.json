@@ -1,0 +1,16 @@
+{
+  "checks": [
+    "real MV3 load and options rendering",
+    "page-script clicks cannot authorize the continue override",
+    "native form paused synchronously and override resumes once",
+    "direct executable link paused and override resumes once",
+    "local mode produces zero service traffic",
+    "options pairing exchanges one-time code with controlled API",
+    "real content-to-worker dynamic flow sends no input values or private queries",
+    "off switch removes pending warning and stops interaction/navigation traffic"
+  ],
+  "count": 8,
+  "api": "controlled local substitute",
+  "loaded_extension": true,
+  "timestamp": "2026-11-04T06:07:52Z"
+}

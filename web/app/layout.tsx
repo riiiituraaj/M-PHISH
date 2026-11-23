@@ -1,37 +1,7 @@
-"use client";
-
+﻿"use client";
 import "./globals.css";
-import { Activity, FlaskConical, Shield } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-
-export default function Layout({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
-
-  return (
-    <html lang="en">
-      <body>
-        <header className="topbar">
-          <Link className="brand" href="/">
-            <span className="brandmark">
-              <Shield size={17} />
-            </span>
-            <span>
-              M-PHISH <b>X</b>
-            </span>
-          </Link>
-          <nav aria-label="Primary navigation">
-            <Link className={pathname === "/" ? "active" : ""} href="/">Dashboard</Link>
-            <Link className={pathname.startsWith("/investigations") ? "active" : ""} href="/investigations">Investigations</Link>
-            <Link className={pathname.startsWith("/research") ? "active" : ""} href="/research">Research</Link>
-            <Link className={pathname.startsWith("/settings") ? "active" : ""} href="/settings">Settings</Link>
-          </nav>
-          <span className="system-state">
-            <Activity size={13} /> Digital Trust Engine v1.0
-          </span>
-        </header>
-        {children}
-      </body>
-    </html>
-  );
-}
+import { SessionControl, SessionProvider, useSession } from "../components/auth";
+function Navigation() { const path = usePathname(); const { user } = useSession(); return <header className="topbar"><Link className="brand" href="/">M-PHISH <b>X</b></Link><nav aria-label="Primary navigation">{[["/", "Overview"], ["/investigations", "Investigations"], ["/research", "Research"], ["/demo", "Demo"], ["/settings", "Settings"], ...(user?.role === "admin" ? [["/admin", "Operations"]] : [])].map(([href, label]) => <Link key={href} className={path === href ? "active" : ""} aria-current={path === href ? "page" : undefined} href={href}>{label}</Link>)}</nav><SessionControl /></header>; }
+export default function Layout({ children }: { children: React.ReactNode }) { return <html lang="en"><body><SessionProvider><a className="skip-link" href="#main-content">Skip to content</a><Navigation /><div id="main-content">{children}</div><footer className="site-footer">Evidence-based website checks. An assessment is not a guarantee of safety. <Link href="/privacy">Privacy and limitations</Link></footer></SessionProvider></body></html>; }

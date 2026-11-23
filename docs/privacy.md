@@ -1,3 +1,11 @@
-# Privacy
+# Privacy and limitations
 
-The extension processes only top-level HTTP(S) navigation URLs needed for security checks. It does not read passwords, keystrokes, cookies, clipboard data, or unrelated browsing content. Low-risk results remain local and are not sent to the deep analyzer. Investigation history is stored by the backend only when a deep check is requested; retention and a no-history preference are planned configuration work.
+The service stores an email, password hash, hashed sessions, settings and owned investigation evidence. Target URLs and form destinations are reduced to origins. Specific endpoint similarity uses a one-way digest rather than a stored path. Logs omit target/body/credential content. Exports contain the same authorized evidence and must be handled as private files.
+
+Extension default mode is local, with cloud consent off. It inspects structural field attributes and requested categories, not values, keystrokes, cookies or clipboard contents. Enabling cloud checks sends origin-only targets and explicitly consented structural observations to the configured service. Session storage temporarily contains a tab's exact URL for stale-result matching and expires cached assessments after sixty seconds; URLs are not sent as full paths to the service. Pairing credentials remain in browser session storage, not sync storage. Disabling protection cancels requests and clears assessments/warnings.
+
+History retention is configurable from 1 to 30 days. Turning history off applies to new results; delete existing reports separately. Account deletion removes owned records and sessions. Operators must schedule retention and expire encrypted backups according to their published policy; deletion cannot erase already downloaded exports. No analytics or advertising telemetry is added.
+
+Visual analysis requires explicit consent and rejects sensitive forms. Its offline renderer disables scripts/network and discards pixels and raw OCR text, retaining limited metadata/brand observations. It is unavailable by default. Optional AI requires both account consent and provider configuration; it receives generated evidence categories/titles/IDs, not raw URLs or page text.
+
+Native top-frame form submits and direct executable links can be paused. Scripts, frames, browser internals and alternate data channels may bypass that coverage. A page controls its own DOM and can remove or imitate an injected notice. The extension cannot guarantee exfiltration prevention. Site identity, textual claims and binary safety are not certified. Configure an actual support/security contact and operator privacy terms before publication; no legal approval is implied.

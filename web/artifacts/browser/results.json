@@ -1,0 +1,16 @@
+{
+  "scope": "Real Chromium UI with controlled API substitute; not backend/queue E2E",
+  "at": "2026-11-04T06:01:36.944665+00:00",
+  "checks": [
+    "desktop sign-in and session navigation",
+    "queued-to-completed flow; unavailable/null results never become trusted or NaN",
+    "JSON export download",
+    "settings persist across reload via API",
+    "unavailable research has no invented winner",
+    "demo is explicitly labelled",
+    "mobile 390px report has no horizontal overflow",
+    "ordinary user sees permission-denied state",
+    "service failure presents unavailable, no sample fallback"
+  ],
+  "browser_errors": []
+}

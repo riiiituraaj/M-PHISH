@@ -1,9 +1,11 @@
 # Architecture
 
-M-PHISH X is a modular monolith for the first cloud-portable release. The MV3 service worker performs navigation filtering, local caching, and the URL quick check. Suspicious or uncertain navigations call the FastAPI investigation API. The backend keeps analysis, evidence, context, risk, AI fallback, and persistence behind module interfaces.
+The dashboard authenticates with opaque HttpOnly SameSite=Strict cookies. Extension pairing exchanges a single-use five-minute code for a thirty-minute bearer session bound to an allowlisted extension origin. Passwords use Argon2; session tokens are stored hashed. Every investigation query includes its owner. Legacy anonymous rows are quarantined rather than assigned an invented owner.
 
-SQLite is the default local store. `DATABASE_URL` is reserved for the PostgreSQL adapter used by a deployment migration. A future worker can extract Playwright and AI work without changing the extension contract.
+An investigation POST commits an owned database job. The dispatcher submits queued work to Redis/RQ; a conditional database lease prevents duplicate publication. Attempts are bounded to three. Cancellation/deletion invalidates publication even when a worker finishes later. Separate API, dispatcher and worker processes replace in-process background scanning. Production requires PostgreSQL and Redis; SQLite is development/test only.
 
-## Request path
+The worker calls a separately isolated collector. It validates all DNS answers and each redirect, connects to an approved numeric peer with TLS hostname verification, and limits bytes, hops and time. A killable subprocess bounds DNS and slow-read stalls. The collector holds no account/queue/provider credentials. `deploy/collector-firewall.sh` supplies Linux host egress restrictions; actual deployment enforcement is still unverified.
 
-`navigation -> local cache -> quick-check -> deep investigation -> evidence -> risk -> explanation -> notification/report`
+The analysis pipeline retains URL, domain/transport, webpage, identity, privacy, synthetic-language, claim, download, campaign, graph, trust, ML and explanation families. Client observations are separate from server facts. No page HTML, input values or screenshots are stored in reports. Evidence has stable IDs, provenance, availability and timestamps. Unavailable modules cannot be silently interpreted as safe. Specific campaign similarity is owner-scoped and does not establish attacker identity.
+
+ML inference loads only a checksum-pinned pure-JSON artifact with a passing release gate. Training/calibration/evaluation are offline commands. No usable validated artifact is bundled. Optional AI selects existing evidence IDs; it cannot change scores or introduce new claims. Optional visual rendering requires explicit consent and a separately provisioned Linux Playwright/OCR runtime; current production images do not provide that optional stack.

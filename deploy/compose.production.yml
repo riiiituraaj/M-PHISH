@@ -1,0 +1,83 @@
+# Requires Linux Docker and collector-firewall.sh before startup.
+# Runtime validation remains a release gate; not tested on this Windows host.
+name: m-phish
+x-runtime: &runtime
+  image: ${BACKEND_IMAGE:?Set an immutable backend image digest}
+  read_only: true
+  tmpfs: ["/tmp:size=64m,noexec,nosuid"]
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  pids_limit: 128
+  mem_limit: 768m
+  cpus: 1.0
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: {max-size: "10m", max-file: "3"}
+x-app-env: &appenv
+  APP_ENV: production
+  DATABASE_URL: ${DATABASE_URL:?Inject a scoped PostgreSQL TLS DSN}
+  REDIS_URL: ${REDIS_URL:?Inject the private Redis DSN}
+  WEB_ORIGINS: ${WEB_ORIGINS:?Set the exact HTTPS dashboard origin}
+  EXTENSION_IDS: ${EXTENSION_IDS:?Set approved extension IDs}
+  ALLOW_REGISTRATION: "false"
+services:
+  migrate:
+    <<: *runtime
+    restart: "no"
+    environment: *appenv
+    networks: [private]
+    healthcheck: {disable: true}
+    command: ["python", "-m", "alembic", "-c", "backend/alembic.ini", "upgrade", "head"]
+  api:
+    <<: *runtime
+    environment: *appenv
+    networks: [private]
+    ports: ["127.0.0.1:8000:8000"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+  dispatcher:
+    <<: *runtime
+    environment: *appenv
+    networks: [private]
+    healthcheck: {disable: true}
+    command: ["python", "-m", "backend.app.jobs"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+  worker:
+    <<: *runtime
+    environment:
+      <<: *appenv
+      CRAWLER_URL: http://collector:8081
+    networks: [private, collection]
+    healthcheck: {disable: true}
+    command: ["python", "-m", "backend.app.worker"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+  collector:
+    <<: *runtime
+    environment: {APP_ENV: collector}
+    networks:
+      collection:
+        ipv4_address: 172.31.90.10
+    command: ["uvicorn", "backend.app.collector:app", "--host", "0.0.0.0", "--port", "8081", "--no-access-log", "--limit-concurrency", "4"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health',timeout=2)"]
+  web:
+    image: ${WEB_IMAGE:?Set an immutable dashboard image digest}
+    read_only: true
+    tmpfs: ["/tmp:size=32m,noexec,nosuid"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    ports: ["127.0.0.1:3000:3000"]
+    networks: [private]
+    restart: unless-stopped
+networks:
+  private:
+    external: true
+    name: ${PRIVATE_NETWORK:?Provision a private network with PostgreSQL and Redis}
+  collection:
+    enable_ipv6: false
+    driver: bridge
+    ipam:
+      config: [{subnet: "172.31.90.0/24"}]

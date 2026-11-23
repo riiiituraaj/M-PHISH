@@ -1,13 +1,15 @@
 {
   "manifest_version": 3,
   "name": "M-PHISH X",
-  "version": "0.1.0",
+  "version": "0.2.0",
+  "minimum_chrome_version": "120",
   "description": "Understand suspicious digital interactions before you trust them.",
-  "icons": {"16": "icon.svg", "32": "icon.svg", "48": "icon.svg", "128": "icon.svg"},
-  "action": {"default_popup": "popup.html", "default_title": "Investigate with M-PHISH X", "default_icon": {"16": "icon.svg", "32": "icon.svg"}},
+  "icons": {"16": "icons/icon16.png", "32": "icons/icon32.png", "48": "icons/icon48.png", "128": "icons/icon128.png"},
+  "action": {"default_popup": "popup.html", "default_title": "Investigate with M-PHISH X", "default_icon": {"16": "icons/icon16.png", "32": "icons/icon32.png"}},
   "options_ui": {"page": "options.html", "open_in_tab": true},
-  "permissions": ["activeTab", "storage", "webNavigation", "notifications"],
-  "host_permissions": ["https://m-phish.onrender.com/*"],
-  "content_scripts": [{"matches": ["http://*/*", "https://*/*"], "exclude_matches": ["https://m-phish.vercel.app/*", "https://m-phish.onrender.com/*", "http://localhost:3000/*"], "js": ["content.js"], "run_at": "document_idle"}],
+  "permissions": ["activeTab", "tabs", "storage", "webNavigation", "notifications"],
+  "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
+  "content_security_policy": {"extension_pages":"script-src 'self'; object-src 'none'; base-uri 'none'"},
+  "content_scripts": [{"matches": ["http://*/*", "https://*/*"], "js": ["content.js"], "run_at": "document_start", "all_frames": false}],
   "background": {"service_worker": "background.js"}
 }

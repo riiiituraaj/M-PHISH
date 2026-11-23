@@ -1,0 +1,105 @@
+{
+  "recorded_at": "2026-11-04T06:06:16.756872+00:00",
+  "results": [
+    {
+      "command": [
+        "C:\\Users\\Asimang\\Desktop\\M-PHISH-main\\M-PHISH-main\\.venv\\Scripts\\python.exe",
+        "-m",
+        "pip",
+        "install",
+        "-r",
+        "backend/requirements-dev.lock"
+      ],
+      "cwd": ".",
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "npm.cmd",
+        "ci"
+      ],
+      "cwd": "web",
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "npm.cmd",
+        "ci"
+      ],
+      "cwd": "extension",
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "C:\\Users\\Asimang\\Desktop\\M-PHISH-main\\M-PHISH-main\\.venv\\Scripts\\python.exe",
+        "-m",
+        "ruff",
+        "check",
+        "backend/app",
+        "backend/tests"
+      ],
+      "cwd": ".",
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "C:\\Users\\Asimang\\Desktop\\M-PHISH-main\\M-PHISH-main\\.venv\\Scripts\\python.exe",
+        "-m",
+        "ruff",
+        "format",
+        "--check",
+        "backend/app",
+        "backend/tests"
+      ],
+      "cwd": ".",
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "C:\\Users\\Asimang\\Desktop\\M-PHISH-main\\M-PHISH-main\\.venv\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "backend/tests",
+        "-q",
+        "--junitxml=C:\\Users\\Asimang\\Desktop\\M-PHISH-main\\M-PHISH-main\\artifacts\\verification\\backend.xml"
+      ],
+      "cwd": ".",
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "npm.cmd",
+        "test"
+      ],
+      "cwd": "web",
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "npm.cmd",
+        "run",
+        "typecheck"
+      ],
+      "cwd": "web",
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "npm.cmd",
+        "run",
+        "build"
+      ],
+      "cwd": "web",
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "npm.cmd",
+        "run",
+        "package"
+      ],
+      "cwd": "extension",
+      "exit_code": 0
+    }
+  ]
+}

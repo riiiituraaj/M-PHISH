@@ -1,73 +1,136 @@
-import asyncio
-import ipaddress
-import socket
-from urllib.parse import urlparse
+"""Passive HTML observations from an isolated collector, never an API browser."""
+
+import hashlib
+import os
+from html.parser import HTMLParser
+from urllib.parse import urljoin, urlsplit
+
+import httpx
+
+from ...core.network import redact_url, resolve_public
+from ..observations import destination_relationship
 
 
-def _safe_host(value: str) -> bool:
-    host = urlparse(value).hostname
-    if not host or urlparse(value).scheme not in {"http", "https"}:
+def _safe_host(value):
+    try:
+        resolve_public(value)
+        return True
+    except (ValueError, OSError):
         return False
-    if host in {"localhost", "localhost.localdomain"} or host.endswith(".local"):
-        return False
+
+
+class PageParser(HTMLParser):
+    def __init__(self, url):
+        super().__init__(convert_charrefs=True)
+        self.url, self.forms, self.passwords = url, 0, 0
+        self.actions, self.fields, self.title = [], [], ""
+        self.endpoint_fingerprints = {}
+        self.in_title = False
+
+    def handle_starttag(self, tag, attrs):
+        attr = dict(attrs)
+        if tag == "title":
+            self.in_title = True
+        if tag == "form":
+            self.forms += 1
+            if len(self.actions) < 12:
+                try:
+                    full = urljoin(self.url, attr.get("action") or self.url)
+                    if urlsplit(full).path not in ("", "/"):
+                        self.endpoint_fingerprints[redact_url(full)] = hashlib.sha256(
+                            (redact_url(full) + urlsplit(full).path).encode()
+                        ).hexdigest()
+                    self.actions.append(
+                        redact_url(urljoin(self.url, attr.get("action") or self.url))
+                    )
+                except ValueError:
+                    pass
+        if tag == "input":
+            kind = str(attr.get("type", "")).lower()
+            self.passwords += int(kind == "password")
+            category = {"password": "password", "email": "email", "tel": "phone"}.get(kind)
+            hint = str(attr.get("autocomplete", "")).lower()
+            if hint.startswith("cc-"):
+                category = "card"
+            if hint == "one-time-code":
+                category = "otp"
+            if category and category not in self.fields:
+                self.fields.append(category)
+
+    def handle_endtag(self, tag):
+        if tag == "title":
+            self.in_title = False
+
+    def handle_data(self, data):
+        if self.in_title:
+            self.title = (self.title + data)[:200]
+
+
+def parse_html(url, html, source="isolated_collector"):
+    parser = PageParser(url)
+    parser.feed(html[:1_000_000])
+    relations = [destination_relationship(url, action) for action in parser.actions]
+    relation = (
+        "unrelated" if "unrelated" in relations else (relations[0] if relations else "unknown")
+    )
+    return {
+        "available": True,
+        "availability": "available",
+        "source": source,
+        "html_available": True,
+        "title": parser.title or "Untitled",
+        "forms": parser.forms,
+        "password_inputs": parser.passwords,
+        "fields": parser.fields,
+        "endpoint_fingerprints": parser.endpoint_fingerprints,
+        "form_actions": parser.actions,
+        "form_action_url": next(
+            (a for a in parser.actions if destination_relationship(url, a) == "unrelated"),
+            parser.actions[0] if parser.actions else None,
+        ),
+        "destination_relationship": relation,
+        "external_form_action": relation == "unrelated",
+        "login_like": parser.passwords > 0,
+        "redirect_count": 0,
+        "screenshot": None,
+        "limitations": [
+            "Passive HTML only; JavaScript behavior and authenticated pages are not inspected."
+        ],
+    }
+
+
+def unavailable(reason="disabled_provider"):
+    return {
+        "available": False,
+        "availability": "unavailable",
+        "reason": reason,
+        "title": "Unavailable",
+        "forms": None,
+        "password_inputs": None,
+        "screenshot": None,
+        "html_available": False,
+    }
+
+
+def analyze_sync(url, timeout_seconds=20, max_redirects=5, max_requests=100, visual_consent=False):
+    endpoint = os.getenv("CRAWLER_URL")
+    if not endpoint:
+        return unavailable()
     try:
-        address = ipaddress.ip_address(host)
-        return not (address.is_private or address.is_loopback or address.is_link_local or address.is_reserved)
-    except ValueError:
-        try:
-            addresses = socket.getaddrinfo(host, None)
-            return all(not ipaddress.ip_address(item[4][0]).is_private and not ipaddress.ip_address(item[4][0]).is_loopback and not ipaddress.ip_address(item[4][0]).is_link_local for item in addresses)
-        except socket.gaierror:
-            return False
+        with httpx.Client(timeout=min(timeout_seconds, 20), trust_env=False) as client:  # noqa: SIM117 -- close response before JSON parsing
+            with client.stream(
+                "POST",
+                endpoint.rstrip("/") + "/inspect",
+                json={"url": url, "visual_consent": visual_consent},
+            ) as response:
+                response.raise_for_status()
+                body = bytearray()
+                for chunk in response.iter_bytes():
+                    body.extend(chunk)
+                    if len(body) > 2_000_000:
+                        return unavailable("response_size_limit")
+        import json
 
-
-async def analyze(url: str, timeout_seconds: int = 15, max_redirects: int = 5, max_html_bytes: int = 1_000_000, max_requests: int = 100) -> dict:
-    """Analyze a page without interaction. Intended for the restricted crawler image."""
-    result = {"available": False, "title": "Unavailable", "forms": 0, "password_inputs": 0, "login_like": False, "external_form_action": False, "redirect_count": 0, "external_domain_count": 0, "screenshot": None, "error": None, "blocked_requests": 0, "request_count": 0}
-    if not _safe_host(url):
-        result["error"] = "Target rejected by crawler network policy"
-        return result
-    try:
-        from playwright.async_api import async_playwright
-    except ImportError:
-        result["error"] = "Playwright is not installed"
-        return result
-    try:
-        async with async_playwright() as playwright:
-            browser = await playwright.chromium.launch(headless=True, downloads_path=None)
-            context = await browser.new_context(java_script_enabled=True, accept_downloads=False)
-            page = await context.new_page()
-            redirects = []
-            external_domains = set()
-            initial_host = urlparse(url).hostname
-            blocked = 0
-            requests = 0
-
-            async def guard(route):
-                nonlocal blocked, requests
-                requests += 1
-                target = route.request.url
-                if requests > max_requests or not _safe_host(target):
-                    blocked += 1
-                    await route.abort("blockedbyclient")
-                    return
-                await route.continue_()
-
-            await context.route("**/*", guard)
-            page.on("request", lambda request: redirects.append(request.url) if request.is_navigation_request() and request.url != url else None)
-            page.on("request", lambda request: external_domains.add(urlparse(request.url).hostname) if urlparse(request.url).hostname and urlparse(request.url).hostname != initial_host else None)
-            response = await page.goto(url, wait_until="domcontentloaded", timeout=timeout_seconds * 1000)
-            if len(redirects) > max_redirects:
-                await browser.close()
-                result["error"] = "Redirect limit exceeded"
-                return result
-            html = (await page.content())[:max_html_bytes]
-            result.update({"available": True, "title": await page.title() or "Unavailable", "forms": await page.locator("form").count(), "password_inputs": await page.locator('input[type="password"]').count(), "login_like": bool(await page.locator('input[type="password"]').count()) or any(term in html.lower() for term in ("sign in", "log in", "verify your account")), "external_form_action": any((urlparse(value).hostname or "") != initial_host for value in await page.locator("form").evaluate_all("forms => forms.map(form => form.action)")), "redirect_count": len(redirects), "external_domain_count": len(external_domains), "status_code": response.status if response else None, "blocked_requests": blocked, "request_count": requests})
-            await browser.close()
-    except Exception as error:
-        result["error"] = type(error).__name__
-    return result
-
-
-def analyze_sync(url: str, timeout_seconds: int = 15, max_redirects: int = 5, max_requests: int = 100) -> dict:
-    return asyncio.run(analyze(url, timeout_seconds, max_redirects, max_requests=max_requests))
+        return json.loads(body)
+    except (ValueError, httpx.HTTPError):
+        return unavailable("collector_unavailable")

@@ -1,1 +1,16 @@
-{"scripts":{"build":"esbuild src/popup.ts src/background.ts src/content.ts src/options.ts --bundle --outdir=. --format=iife"},"devDependencies":{"@types/chrome":"^0.0.287","esbuild":"^0.24.2","typescript":"^5.7.2"}}
+{
+    "name": "m-phish-extension",
+    "version": "0.2.0",
+    "private": true,
+    "scripts": {
+        "build": "esbuild src/popup.ts src/background.ts src/content.ts src/options.ts --bundle --outdir=. --format=iife",
+        "typecheck": "tsc --noEmit",
+        "test": "node tests/run.cjs",
+        "package": "npm run typecheck && npm run test && npm run build && python scripts/package.py"
+    },
+    "devDependencies": {
+        "@types/chrome": "0.0.287",
+        "esbuild": "0.25.12",
+        "typescript": "5.9.3"
+    }
+}

@@ -1,32 +1,42 @@
-from dataclasses import dataclass, asdict
+"""Deterministic policy v2. Scores are warning indicators, not safety probabilities."""
+
+from dataclasses import dataclass, field
 from typing import Literal
 
-TrustState = Literal["TRUSTED", "CAUTION", "HIGH_RISK", "STOP"]
+from ..observations import destination_relationship, page_available
+
+TrustState = Literal[
+    "UNKNOWN", "NO_SIGNIFICANT_RISK_OBSERVED", "TRUSTED", "CAUTION", "HIGH_RISK", "STOP"
+]
 
 
 @dataclass
 class WebsiteAuthenticity:
-    identity_score: int       # 0 - 100
-    content_score: int        # 0 - 100
-    behavior_score: int       # 0 - 100
-    consistency_score: int    # 0 - 100
-    overall_score: int        # 0 - 100
-    level: str                # HIGH, MODERATE, LOW
-    explanation: str          # Evidence-backed disclaimer
+    identity_score: int | None
+    content_score: int | None
+    behavior_score: int | None
+    consistency_score: int | None
+    overall_score: int | None
+    level: str
+    explanation: str
+    availability: str = "partial"
 
 
 @dataclass
 class DigitalTrustProfile:
-    identity_trust: int       # 0 - 100
-    security_trust: int       # 0 - 100
-    content_trust: int        # 0 - 100
-    interaction_trust: int    # 0 - 100
-    privacy_trust: int        # 0 - 100
-    behavioral_trust: int     # 0 - 100
-    authenticity: int         # 0 - 100
-    overall_trust: int        # 0 - 100
-    trust_state: TrustState   # TRUSTED, CAUTION, HIGH_RISK, STOP
-    state_reason: str         # Clear human reason why this state was assigned
+    identity_trust: int | None
+    security_trust: int | None
+    content_trust: int | None
+    interaction_trust: int | None
+    privacy_trust: int | None
+    behavioral_trust: int | None
+    authenticity: int | None
+    overall_trust: int | None
+    trust_state: TrustState
+    state_reason: str
+    coverage: float = 0.0
+    decision_evidence_ids: list[str] = field(default_factory=list)
+    policy_version: str = "evidence-policy-v2"
 
 
 @dataclass
@@ -37,84 +47,35 @@ class DynamicTrustTransition:
     reason: str
     requires_intervention: bool
     recommended_action: str
+    observation_source: str = "client_reported"
+
+
+def _external_credentials(page: dict) -> bool:
+    relation = page.get("destination_relationship")
+    return bool(
+        page.get("password_inputs", 0)
+        and (relation == "unrelated" or (relation is None and page.get("external_form_action")))
+    )
 
 
 def compute_authenticity(
-    identity_consistency: str,
-    domain_data: dict,
-    page_data: dict,
-    synthetic_data: dict,
+    identity_consistency: str, domain_data: dict, page_data: dict, synthetic_data: dict
 ) -> WebsiteAuthenticity:
-    """Compute multidimensional website authenticity."""
-    # 1. Identity score (alignment between claimed identity and domain)
-    if identity_consistency == "HIGH":
-        identity_score = 92
-    elif identity_consistency == "MEDIUM":
-        identity_score = 58
-    elif identity_consistency == "LOW":
-        identity_score = 22
-    else:
-        identity_score = 75  # neutral/unclaimed
-
-    # Deductions for suspicious domain signals
-    if domain_data.get("tls_mismatch"):
-        identity_score = max(10, identity_score - 30)
-
-    # 2. Content score (coherence, lack of generic spam / high synthetic penalties)
-    content_score = 85
-    if synthetic_data.get("is_synthetic_likely"):
-        content_score -= 25
-    if page_data.get("urgency_text"):
-        content_score -= 20
-    content_score = max(15, min(100, content_score))
-
-    # 3. Behavior score (forms, redirects, clean navigation)
-    behavior_score = 90
-    if page_data.get("external_form_action"):
-        behavior_score -= 65
-    if page_data.get("redirect_count", 0) > 2:
-        behavior_score -= 20
-    behavior_score = max(10, min(100, behavior_score))
-
-    # 4. Consistency score (visual/branding vs technical domain)
-    consistency_score = 85
-    if identity_consistency == "LOW":
-        consistency_score -= 50
-    elif identity_consistency == "MEDIUM":
-        consistency_score -= 20
-    if page_data.get("external_form_action") and page_data.get("password_inputs", 0) > 0:
-        consistency_score -= 25
-    consistency_score = max(10, min(100, consistency_score))
-
-    # Overall authenticity
-    overall_score = round(
-        identity_score * 0.35 +
-        content_score * 0.20 +
-        behavior_score * 0.25 +
-        consistency_score * 0.20
-    )
-    overall_score = max(0, min(100, overall_score))
-
-    if overall_score >= 75:
-        level = "HIGH AUTHENTICITY"
-    elif overall_score >= 45:
-        level = "MODERATE AUTHENTICITY"
-    else:
-        level = "LOW AUTHENTICITY"
-
-    explanation = (
-        f"Based on the available evidence, this website demonstrates {level.lower()} "
-        f"across its domain identity, content coherence, and technical form destinations."
-    )
-
+    available = page_available(page_data)
+    identity = 20 if identity_consistency == "LOW" else None
+    behavior = 15 if _external_credentials(page_data) else None
+    concerns = identity is not None or behavior is not None
     return WebsiteAuthenticity(
-        identity_score=identity_score,
-        content_score=content_score,
-        behavior_score=behavior_score,
-        consistency_score=consistency_score,
-        overall_score=overall_score,
-        level=level,
-        explanation=explanation,
+        identity,
+        None,
+        behavior,
+        identity,
+        min([v for v in (identity, behavior) if v is not None], default=None),
+        "CONCERN_OBSERVED" if concerns else "INSUFFICIENT_EVIDENCE",
+        "Observed identity or submission concerns warrant review; scores are rule indicators, not probabilities."
+        if concerns
+        else "Authenticity has not been established. Completed checks cannot certify ownership or intent.",
+        "partial" if available else "unavailable",
     )
 
 
@@ -123,179 +84,108 @@ def compute_digital_trust_profile(
     domain_data: dict,
     page_data: dict,
     authenticity: WebsiteAuthenticity,
-    privacy_risk_score: int,
-    calibrated_ml_prob: float,
+    privacy_risk_score: int | None,
+    calibrated_ml_prob: float | None,
     evidence: list[dict],
+    model_threshold: float | None = None,
 ) -> DigitalTrustProfile:
-    """
-    Calculate an explainable, 7-dimensional Digital Trust Profile.
-    Each dimension is normalized between 0 and 100 (100 = maximum trust).
-    """
-    # 1. Identity Trust
-    id_trust = authenticity.identity_score
-    if url_features.get("ip_based_url"):
-        id_trust = min(id_trust, 25)
-
-    # 2. Security Trust (Transport & standard network security)
-    sec_trust = 90
-    if not url_features.get("https"):
-        sec_trust -= 45
-    if url_features.get("unusual_port"):
-        sec_trust -= 30
-    tls = domain_data.get("tls", {})
-    if tls and not tls.get("available") and url_features.get("https"):
-        sec_trust -= 35
-    sec_trust = max(10, min(100, sec_trust))
-
-    # 3. Content Trust
-    cnt_trust = authenticity.content_score
-
-    # 4. Interaction Trust (How safe is it to interact with fields?)
-    has_pwd = page_data.get("password_inputs", 0) > 0
-    ext_action = page_data.get("external_form_action", False)
-    if ext_action and has_pwd:
-        int_trust = 15
-    elif ext_action:
-        int_trust = 35
-    elif has_pwd and id_trust < 50:
-        int_trust = 30
-    elif has_pwd:
-        int_trust = 80
-    else:
-        int_trust = 95
-
-    # 5. Privacy Trust (Derived from user data collection burden)
-    priv_trust = max(15, 100 - privacy_risk_score)
-
-    # 6. Behavioral Trust (Clean network / redirection behavior)
-    beh_trust = authenticity.behavior_score
-
-    # 7. Authenticity Composite
-    auth_trust = authenticity.overall_score
-
-    # Overall Trust Score (0 - 100)
-    # Balanced blend: 25% Identity, 20% Security, 20% Interaction, 15% Behavioral, 10% Privacy, 10% Authenticity
-    raw_overall = (
-        id_trust * 0.25 +
-        sec_trust * 0.20 +
-        int_trust * 0.20 +
-        beh_trust * 0.15 +
-        priv_trust * 0.10 +
-        auth_trust * 0.10
-    )
-
-    # Strong penalty if ML detects high calibrated phishing probability
-    if calibrated_ml_prob >= 0.70:
-        raw_overall = min(raw_overall, 22.0)
-    elif calibrated_ml_prob >= 0.45:
-        raw_overall = min(raw_overall, 48.0)
-
-    overall_trust = round(max(0, min(100, raw_overall)))
-
-    # Determine state and plain-language reason
-    if ext_action and has_pwd:
-        state = "STOP"
-        reason = "A password input sends submitted information to an external, unrelated website address."
-    elif overall_trust < 30 or calibrated_ml_prob >= 0.75:
-        state = "STOP"
-        reason = "Multiple high-severity risk signals indicate this page presents a severe digital safety hazard."
-    elif overall_trust < 55 or has_pwd and id_trust < 50:
-        state = "HIGH_RISK"
-        reason = "This website presents sensitive interaction requirements without verifiable identity consistency."
-    elif overall_trust < 80:
-        state = "CAUTION"
-        reason = "Some aspects of this website warrant review before sharing personal details."
-    else:
-        state = "TRUSTED"
-        reason = "Observed website identity, security posture, and behavior appear consistent and trustworthy."
-
+    observed = page_available(page_data)
+    dns_observed = bool(domain_data.get("a_records") or domain_data.get("aaaa_records"))
+    tls_observed = domain_data.get("tls", {}).get("available") is True
+    coverage = round((1 + observed + dns_observed + tls_observed) / 4, 2)
+    danger = _external_credentials(page_data)
+    mismatch = authenticity.identity_score is not None and authenticity.identity_score <= 20
+    severe = [
+        e
+        for e in evidence
+        if e.get("severity") in {"HIGH", "CRITICAL"} and e.get("weight", 0) >= 20
+    ]
+    warning_ids = [e.get("id", "") for e in severe if e.get("id")]
+    state: TrustState = "UNKNOWN"
+    reason = "Insufficient observations to assess this page. Missing information does not establish safety."
+    overall = None
+    if danger:
+        state, overall = "STOP", 15
+        reason = "An observed password form targets an unrelated destination. Review that destination before submitting."
+    elif mismatch:
+        state, overall = "STOP", 20
+        reason = "Authentication branding conflicts with the catalogued service domain."
+    elif severe:
+        state, overall = "HIGH_RISK", 30
+        reason = "Completed checks produced a high-severity warning even though other observations may be unavailable."
+    elif (
+        calibrated_ml_prob is not None
+        and model_threshold is not None
+        and calibrated_ml_prob >= model_threshold
+    ):
+        state, overall = "HIGH_RISK", 30
+        reason = "The configured validated model exceeded its warning threshold; review the report scope and limitations."
+    elif (
+        page_data.get("availability") == "available"
+        and dns_observed
+        and (tls_observed or domain_data.get("tls", {}).get("reason") == "http_transport")
+    ):
+        state = "CAUTION" if page_data.get("urgency_text") else "NO_SIGNIFICANT_RISK_OBSERVED"
+        reason = "No significant risk observed in the checks completed. This does not certify the page or its owner."
     return DigitalTrustProfile(
-        identity_trust=id_trust,
-        security_trust=sec_trust,
-        content_trust=cnt_trust,
-        interaction_trust=int_trust,
-        privacy_trust=priv_trust,
-        behavioral_trust=beh_trust,
-        authenticity=auth_trust,
-        overall_trust=overall_trust,
-        trust_state=state,
-        state_reason=reason,
+        authenticity.identity_score,
+        None,
+        None,
+        15 if danger else None,
+        None,
+        authenticity.behavior_score,
+        authenticity.overall_score,
+        overall,
+        state,
+        reason,
+        coverage,
+        warning_ids,
     )
 
 
 def evaluate_dynamic_interaction(
     current_profile: DigitalTrustProfile,
-    action_type: str,  # e.g., 'page_loaded', 'form_focused', 'password_focused', 'payment_focused', 'download_attempt'
+    action_type: str,
     action_details: dict | None = None,
 ) -> DynamicTrustTransition:
-    """
-    Evaluate user interaction step and dynamically adjust trust state:
-    Website opened -> LOW CONCERN / TRUSTED
-    Login form appears -> CAUTION
-    Password field active -> HIGH RISK
-    External destination detected -> STOP
-    """
     details = action_details or {}
-    prev = current_profile.trust_state
-    curr = prev
+    state = current_profile.trust_state
     reason = current_profile.state_reason
-    intervene = False
-    action = "Continue normally."
-
-    if action_type in ("password_focused", "otp_focused", "banking_focused"):
-        if current_profile.overall_trust < 55 or current_profile.interaction_trust < 50:
-            curr = "STOP"
-            reason = "You are entering sensitive credentials on a page whose identity could not be verified."
-            intervene = True
-            action = "We strongly recommend not entering your credentials here. Open the official service directly."
-        elif current_profile.overall_trust < 80:
-            curr = "HIGH_RISK"
-            reason = "Sensitive credentials requested on an unfamiliar page. Confirm the web address carefully."
-            intervene = True
-            action = "Verify the website address before continuing."
-        else:
-            curr = "CAUTION"
-            reason = "Sensitive credentials field active. Website appears consistent."
-            intervene = False
-            action = "Proceed with awareness."
-
-    elif action_type in ("card_focused", "payment_focused"):
-        if current_profile.overall_trust < 60:
-            curr = "STOP"
-            reason = "Payment information requested by an unverified website."
-            intervene = True
-            action = "Do not enter card or payment details on this website."
-        else:
-            curr = "CAUTION"
-            reason = "Payment input detected. Ensure you recognize the payment gateway."
-            intervene = False
-            action = "Check checkout details before paying."
-
-    elif action_type == "download_attempt":
-        if current_profile.overall_trust < 60 or details.get("is_executable"):
-            curr = "STOP"
-            reason = "This website is attempting to download an executable file while having low trust indicators."
-            intervene = True
-            action = "Cancel this download. Only download executables from verified official sources."
-        else:
-            curr = "CAUTION"
-            reason = "File download initiated."
-            intervene = False
-            action = "Confirm file type before opening."
-
-    elif action_type == "form_focused":
-        if current_profile.overall_trust < 50:
-            curr = "HIGH_RISK"
-            reason = "Web form detected on a low-trust domain."
-            intervene = True
-            action = "Check what information is being asked before typing."
-
-    return DynamicTrustTransition(
-        previous_state=prev,
-        current_state=curr,
-        trigger_event=action_type,
-        reason=reason,
-        requires_intervention=intervene,
-        recommended_action=action,
+    intervene = state in {"STOP", "HIGH_RISK"}
+    action = "Review the destination before sharing sensitive information."
+    source = str(details.get("page_url") or details.get("url") or "")
+    destination = str(
+        details.get("form_action")
+        or details.get("form_action_url")
+        or details.get("destination")
+        or ""
     )
-
+    relation = (
+        destination_relationship(source, destination) if source and destination else "unknown"
+    )
+    sensitive = action_type in {
+        "password_focused",
+        "otp_focused",
+        "banking_focused",
+        "card_focused",
+    }
+    sensitive = sensitive or (
+        action_type in {"form_submit", "form_focused"}
+        and bool(set(details.get("field_categories", [])) & {"password", "otp", "card", "banking"})
+    )
+    if sensitive and relation == "unrelated":
+        state, intervene = "STOP", True
+        reason = "The browser reports a sensitive form submitting to an unrelated destination. This observation has not been independently verified."
+        action = "Pause and verify the destination before submitting."
+    elif action_type == "download_attempt" and details.get("is_executable"):
+        state, intervene = "CAUTION", True
+        reason = "The browser reports a download whose file extension can execute code. Its contents have not been scanned."
+        action = "Continue only if you intended to download it and recognize the source."
+    elif sensitive and not intervene:
+        state = "UNKNOWN" if current_profile.trust_state == "UNKNOWN" else "CAUTION"
+        reason = (
+            "Sensitive input was reported. A field type alone does not establish credential theft."
+        )
+    return DynamicTrustTransition(
+        current_profile.trust_state, state, action_type, reason, intervene, action
+    )

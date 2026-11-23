@@ -1,27 +1,21 @@
-import socket
-import ssl
-from urllib.parse import urlparse
+"""Domain observations come from the isolated collector, never API egress."""
+
+from urllib.parse import urlsplit
 
 
-def analyze(url: str, timeout: float = 3.0) -> dict:
-    parsed = urlparse(url)
-    host = parsed.hostname or ""
-    result = {"hostname": host, "a_records": [], "aaaa_records": [], "mx_records": None, "ns_records": None, "tls": None, "availability": "available"}
-    try:
-        addresses = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
-        result["a_records"] = sorted({item[4][0] for item in addresses if ":" not in item[4][0]})
-        result["aaaa_records"] = sorted({item[4][0] for item in addresses if ":" in item[4][0]})
-    except (socket.gaierror, socket.timeout):
-        result["availability"] = "partial"
-    if parsed.scheme == "https":
-        try:
-            context = ssl.create_default_context()
-            with socket.create_connection((host, parsed.port or 443), timeout=timeout) as connection:
-                with context.wrap_socket(connection, server_hostname=host) as tls_socket:
-                    certificate = tls_socket.getpeercert()
-                    result["tls"] = {"available": True, "subject": certificate.get("subject", []), "issuer": certificate.get("issuer", []), "not_after": certificate.get("notAfter")}
-        except (OSError, ssl.SSLError):
-            result["tls"] = {"available": False}
-    else:
-        result["tls"] = {"available": False}
-    return result
+def analyze(url, timeout=3.0):
+    return {
+        "hostname": urlsplit(url).hostname,
+        "availability": "unavailable",
+        "reason": "collector_not_run",
+        "a_records": None,
+        "aaaa_records": None,
+        "mx_records": None,
+        "ns_records": None,
+        "age_days": None,
+        "registration": {
+            "availability": "unavailable",
+            "reason": "provider_not_configured",
+        },
+        "tls": {"available": False, "reason": "not_observed"},
+    }

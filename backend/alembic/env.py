@@ -1,8 +1,15 @@
 from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 config = context.config
+if os.getenv('DATABASE_URL'):
+    config.set_main_option('sqlalchemy.url', os.environ['DATABASE_URL'].replace('%', '%%'))
 if config.config_file_name:
     fileConfig(config.config_file_name)
 target_metadata = None

@@ -1,155 +1,101 @@
-from fastapi.testclient import TestClient
-from backend.app.main import app
-from backend.app.services.ml.model import get_threat_model
+import numpy as np
+
+from backend.app.analysis import build_report
 from backend.app.services.ml.experiments import run_multimodal_experiments
-
-client = TestClient(app)
-
-
-def test_safe_website_scenario():
-    """Scenario 1: Normal harmless website yields TRUSTED state and high authenticity."""
-    resp = client.post("/api/investigations", json={"url": "http://m-phish.local/simple-site.html"})
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["status"] == "completed"
-    assert data["digital_trust_profile"]["trust_state"] in ("TRUSTED", "CAUTION")
-    assert data["digital_trust_profile"]["overall_trust"] >= 50
-    assert data["website_authenticity"]["overall_score"] >= 60
+from backend.app.services.ml.model import extract_features_vector, get_threat_model
 
 
-def test_fake_login_external_destination():
-    """Scenario 2: Password submitted to cross-origin collector triggers STOP state."""
-    resp = client.post("/api/investigations", json={"url": "http://m-phish.local/suspicious-login.html"})
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["digital_trust_profile"]["trust_state"] == "STOP"
-    assert data["trust_before_you_act"]["requires_intervention"] is True
-    assert any(e["category"] == "BEHAVIOR" for e in data["evidence"])
+def test_missing_dom_dns_tls_is_unknown():
+    report = build_report("https://example.com", remote=False)
+    assert report["classification"] == "UNKNOWN"
+    assert report["digital_trust_profile"]["trust_state"] == "UNKNOWN"
+    assert report["website_authenticity"]["overall_score"] is None
+    assert report["ml_prediction"]["raw_probability"] is None
+    assert report["ml_prediction"]["calibrated_probability"] is None
 
 
-def test_identity_mismatch_and_safe_route():
-    """Scenario 3: Page claiming to be Google Account on an unverified domain triggers Safe Route."""
-    resp = client.post("/api/investigations", json={"url": "http://m-phish.local/identity-mismatch.html"})
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["identity_analysis"]["is_impersonation_suspected"] is True
-    assert data["identity_analysis"]["identity_consistency"] == "LOW"
-    assert data["safe_route"] == "https://accounts.google.com"
-    assert data["digital_trust_profile"]["trust_state"] == "STOP"
+def test_tutorial_brand_mention_is_not_impersonation():
+    report = build_report(
+        "https://tutorial.example",
+        fixture_html="<title>Google Drive tutorial</title><p>Use Google Drive to share files.</p>",
+        remote=False,
+    )
+    assert not report["identity_analysis"]["is_impersonation_suspected"]
+    assert report["safe_route"] is None
 
 
-def test_synthetic_content_detection_is_contextual():
-    """Scenario 4: AI-assisted text is flagged contextually without claiming it is inherently malicious."""
-    resp = client.post("/api/investigations", json={"url": "http://m-phish.local/synthetic-content.html"})
-    assert resp.status_code == 200
-    data = resp.json()
-    synthetic = data["synthetic_web_analysis"]
-    assert synthetic["is_synthetic_likely"] is True
-    assert len(synthetic["indicators"]) > 0
-    # Must explicitly state that AI-assisted creation does not by itself imply malice
-    assert "not" in synthetic["context_note"].lower()
+def test_warning_survives_missing_domain_information():
+    report = build_report(
+        "https://deceptive.example",
+        fixture_html='<title>Google Account Login</title><form action="https://collector.example/submit"><input type="password"></form>',
+        remote=False,
+    )
+    assert report["classification"] in ("HIGH", "CRITICAL")
+    assert report["digital_trust_profile"]["trust_state"] in ("HIGH_RISK", "STOP")
+    assert report["domain_analysis"]["availability"] == "unavailable"
+    assert report["decision_evidence_ids"]
 
 
-def test_privacy_heavy_form_assessment():
-    """Scenario 5: Form harvesting phone, address, government ID, PIN, and OTP is flagged."""
-    resp = client.post("/api/investigations", json={"url": "http://m-phish.local/privacy-heavy.html"})
-    assert resp.status_code == 200
-    data = resp.json()
-    privacy = data["privacy_assessment"]
-    assert privacy["sensitive_count"] >= 2
-    assert privacy["risk_level"] in ("ELEVATED", "HIGH")
-    assert any(f["name"] == "otp" and f["detected"] for f in privacy["requested_fields"])
+def test_same_site_and_known_sso_are_contextual():
+    for target in (
+        "/login",
+        "https://accounts.google.com/login",
+        "https://checkout.stripe.com/pay",
+    ):
+        report = build_report(
+            "https://shop.example.com",
+            fixture_html=f'<title>Sign in</title><form action="{target}"><input type="password"></form>',
+            remote=False,
+        )
+        assert report["classification"] not in ("HIGH", "CRITICAL")
+        assert not report["identity_analysis"]["is_impersonation_suspected"]
 
 
-def test_download_risk_assessment():
-    """Scenario 6: Executable file (.exe) on untrusted page triggers download alert."""
-    resp = client.post("/api/investigations", json={"url": "http://m-phish.local/download-risk.html"})
-    assert resp.status_code == 200
-    data = resp.json()
-    download = data["download_safety"]
-    assert download["has_download"] is True
-    assert download["is_executable_or_script"] is True
-    assert download["risk_level"] in ("ATTENTION", "HIGH_RISK")
-
-
-def test_dynamic_trust_evaluation_endpoint():
-    """Dynamic trust endpoint responds to user interaction steps and flags sensitive field focus."""
-    resp = client.post(
+def test_consented_extension_observation_changes_decision(signed):
+    response = signed.post(
         "/api/v1/dynamic-trust/evaluate",
         json={
-            "url": "http://m-phish.local/identity-mismatch.html",
-            "action_type": "password_focused",
-            "action_details": {"field": "password"},
+            "url": "https://normal.example",
+            "action_type": "form_submit",
+            "action_details": {
+                "form_action": "https://unrelated.example",
+                "field_categories": ["password"],
+            },
+            "context": {
+                "observations": {
+                    "consent": True,
+                    "fields": ["password"],
+                    "password_inputs": 1,
+                    "forms": 1,
+                    "form_actions": ["https://unrelated.example"],
+                }
+            },
         },
     )
-    assert resp.status_code == 200
-    data = resp.json()["data"]
-    assert data["requires_intervention"] is True
-    assert data["transition"]["current_state"] == "STOP"
-    assert data["safe_route"] == "https://accounts.google.com"
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["requires_intervention"]
+    assert response.json()["data"]["evidence"]
 
 
-def test_calibrated_ml_model_bounds():
-    """Calibrated XGBoost model returns valid probability between 0.0 and 1.0."""
-    model = get_threat_model()
-    # High risk sample - suspicious URL with phishing indicators
-    pred_high = model.predict_multimodal(
-        {
-            "url_length": 120,
-            "hostname_length": 45,
-            "subdomain_count": 3,
-            "ip_based_url": True,
-            "https": False,
-            "unusual_port": True,
-            "suspicious_keywords": ["login", "verify", "secure"],
-        },
-        domain_analysis={"tls": {"available": False}, "age_days": 5.0, "tls_mismatch": True},
-        page_analysis={"forms": 1, "password_inputs": 1, "login_like": True, "external_form_action": True, "urgency_text": True},
-        context={"brand_name_mismatch": True, "claimed_org_unverified": True},
+def test_field_values_never_enter_report():
+    report = build_report(
+        "https://example.com",
+        fixture_html='<form><input type="password" value="secret-sentinel"></form>',
+        remote=False,
     )
-    assert 0.0 <= pred_high.calibrated_probability <= 1.0
-    assert pred_high.model_name == "xgboost-platt-calibrated"
-    assert pred_high.calibration_method == "platt-scaling"
-
-    # Low risk sample - clean URL with legitimate indicators
-    pred_low = model.predict_multimodal(
-        {
-            "url_length": 22,
-            "hostname_length": 12,
-            "subdomain_count": 0,
-            "ip_based_url": False,
-            "https": True,
-            "unusual_port": False,
-            "suspicious_keywords": [],
-        },
-        domain_analysis={"tls": {"available": True}, "age_days": 3650.0, "tls_mismatch": False},
-        page_analysis={"forms": 0, "password_inputs": 0, "login_like": False, "external_form_action": False, "urgency_text": False},
-        context={"brand_name_mismatch": False, "claimed_org_unverified": False},
-    )
-    assert 0.0 <= pred_low.calibrated_probability <= 1.0
-    assert pred_low.calibrated_probability < pred_high.calibrated_probability
+    assert "secret-sentinel" not in str(report)
+    assert report["privacy_assessment"]["sensitive_count"] == 1
 
 
-def test_research_multimodal_experiments():
-    """Multimodal ablation study endpoint computes Experiments A to E with standard metrics."""
-    resp = client.get("/api/v1/research/experiments")
-    assert resp.status_code == 200
-    data = resp.json()["data"]
-    experiments = data["experiments"]
-    assert len(experiments) == 5
-    exp_ids = [e["experiment_id"] for e in experiments]
-    assert exp_ids == ["EXP-A", "EXP-B", "EXP-C", "EXP-D", "EXP-E"]
-    for exp in experiments:
-        assert 0.0 <= exp["accuracy"] <= 1.0
-        assert 0.0 <= exp["roc_auc"] <= 1.0
-        assert 0.0 <= exp["brier_score"] <= 1.0
-        assert exp["inference_latency_ms"] >= 0.0
+def test_missing_features_and_research_no_runtime_training():
+    vector = extract_features_vector({"url_length": 20})
+    assert np.isnan(vector[14])  # no invented domain age
+    assert get_threat_model().predict_multimodal({"url_length": 20}).calibrated_probability is None
+    assert run_multimodal_experiments() == []
 
 
-def test_demo_scenarios_endpoint():
-    """Demo scenarios endpoint returns safe local walkthrough fixtures."""
-    resp = client.get("/api/v1/demo/scenarios")
-    assert resp.status_code == 200
-    scenarios = resp.json()["data"]
-    assert len(scenarios) >= 6
-
+def test_demo_is_isolated(signed):
+    report = signed.post("/api/v1/demo/scenarios/benign-login")
+    assert report.status_code == 200, report.text
+    assert report.json()["data"]["demo"] is True
+    assert signed.get("/api/v1/investigations").json()["data"] == []

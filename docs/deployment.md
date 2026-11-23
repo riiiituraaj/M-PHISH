@@ -1,14 +1,16 @@
-# Deployment
+# Deployment path: Linux Docker with private PostgreSQL and Redis
 
-Local development uses the included FastAPI, Next.js, and SQLite setup. Run the backend and dashboard as separate processes or use Docker Compose. Production should place a TLS-terminating load balancer in front of API instances, use PostgreSQL, and run browser analysis in restricted workers. No Kubernetes or broker is required for the first release.
+Status: configuration prepared, not runtime verified or deployed. This Windows workspace has no Docker runtime and no verified M-PHISH hosting destination. Historical service URLs are not deployment authorization. Do not expose the API or collector until the following gates pass in an authorized Linux staging environment.
 
-## Deep crawler
+1. Provision private PostgreSQL/Redis with scoped TLS credentials, a dedicated private Docker network, encrypted backups, an HTTPS reverse proxy, and an operator-controlled domain. Supply secrets via the deployment environment, never images or source. Set exact WEB_ORIGINS and approved EXTENSION_IDS; keep ALLOW_REGISTRATION=false.
+2. Build backend from the repository root (`docker build -f backend/Dockerfile ...`) and dashboard from `web/`, supplying its public HTTPS API URL as NEXT_PUBLIC_API_URL build argument. Push only to an approved registry. Record immutable image digests in BACKEND_IMAGE and WEB_IMAGE. Verify locks and scans first.
+3. Review `deploy/collector-firewall.sh` against host routing and the configured collector address 172.31.90.10. Apply it on the Docker host before starting collection. It installs dedicated DOCKER-USER/INPUT restrictions without flushing global rules; apply during a controlled maintenance window. Prove private/link-local/metadata/loopback and IPv6 cannot be reached from the collector, including redirects and mixed DNS responses. Validate host DNS resolution separately. A script existing in source is not evidence of enforcement.
+4. Set PRIVATE_NETWORK, DATABASE_URL, REDIS_URL, WEB_ORIGINS and EXTENSION_IDS. Run `docker compose -f deploy/compose.production.yml config` with secrets protected from logs, then `up -d`. Migration completes before API/dispatcher/worker startup. No development server or source bind mount is used. The collector has no persistence/provider secrets.
+5. Create an administrator with the local management command inside an approved operator session. Keep account creation controlled. Configure reverse-proxy request limits, HTTPS/security headers, narrowly trusted proxy addresses and restricted health/admin exposure. Verify cross-origin cookies with the actual site topology; Strict cookies require a suitable same-site deployment.
+6. In staging, verify health, login/logout, two-account history isolation, safe investigation completion, queue restart, collector failures, expiry, cancellation, exports, static assets and real extension pairing. Run backup/restore and rollback rehearsals before approving production. Record deployed image digests, schema revision and test evidence.
 
-The bounded Playwright analyzer is opt-in with `ENABLE_PLAYWRIGHT=true`:
+Production resource defaults are bounded but not a measured capacity promise: collector concurrency 2 internally, 24-second hard collection deadline, 1 MiB response cap, five redirects, worker job timeout 30 seconds, three attempts, per-user three active jobs and global admission target 200. Start with one worker and measure throughput/backlog before increasing replicas. Rule-only fallback must remain visible when collection or models are unavailable.
 
-```powershell
-.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
-.venv\Scripts\python.exe -m playwright install chromium
-```
+The optional visual/OCR stack is not included in production images. To enable it, build a separately reviewed Linux collector image with compatible Playwright Chromium, OS sandbox dependencies, pytesseract and Tesseract; validate sandbox operation, offline rendering, deadline/process cleanup and image disposal before setting ENABLE_VISUAL. Do not use `--no-sandbox` to make it pass. Model deployment also requires a licensed, independently evaluated checksum-pinned artifact.
 
-The backend image installs Chromium and runs as UID 10001 without host mounts. For public production traffic, move this analyzer into a separate worker with an explicit network policy before enabling it. It rejects non-public targets, does not submit forms, disables downloads, caps redirects and requests, and returns unavailable metadata when it cannot run.
+See OPERATIONS.md for retention, recovery and rollback. No store submission, paid infrastructure provisioning or remote publishing has been performed.
